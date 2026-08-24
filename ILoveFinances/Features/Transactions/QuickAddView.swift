@@ -1,0 +1,188 @@
+import SwiftData
+import SwiftUI
+
+/// Alta rapida. Es la pantalla mas usada de la app y el criterio de cierre la
+/// cronometra: registrar un gasto en menos de 10 segundos desde abrir la app.
+///
+/// De ahi las decisiones de aqui: importe primero y con el teclado ya enfocado,
+/// las 6 categorias mas usadas recientemente a un toque, y fecha por defecto
+/// hoy. Guardar y cerrar en tres toques.
+struct QuickAddView: View {
+    @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+
+    @Query(sort: \Account.name) private var accounts: [Account]
+    @Query(sort: \TransactionCategory.sortOrder) private var categories: [TransactionCategory]
+    @Query(sort: \FamilyTag.sortOrder) private var familyTags: [FamilyTag]
+    @Query(sort: \Transaction.date, order: .reverse) private var recent: [Transaction]
+
+    @State private var amountText = ""
+    @State private var kind: TransactionKind = .expense
+    @State private var date = Date()
+    @State private var note = ""
+    @State private var selectedAccount: Account?
+    @State private var counterpartAccount: Account?
+    @State private var selectedCategory: TransactionCategory?
+    @State private var selectedFamilyTag: FamilyTag?
+
+    @FocusState private var amountFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("0,00", text: $amountText)
+                        .keyboardType(.decimalPad)
+                        .font(.system(size: 40, weight: .semibold, design: .rounded))
+                        .multilineTextAlignment(.center)
+                        .focused($amountFocused)
+
+                    Picker("Tipo", selection: $kind) {
+                        ForEach(TransactionKind.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                if kind != .transfer {
+                    Section("Categoría") {
+                        if !suggestedCategories.isEmpty {
+                            categoryShortcuts
+                        }
+                        Picker("Todas", selection: $selectedCategory) {
+                            Text("Sin categoría").tag(TransactionCategory?.none)
+                            ForEach(categoriesForKind) { category in
+                                Text(category.name).tag(TransactionCategory?.some(category))
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    Picker(kind == .transfer ? "Desde" : "Cuenta", selection: $selectedAccount) {
+                        Text("Ninguna").tag(Account?.none)
+                        ForEach(activeAccounts) { Text($0.name).tag(Account?.some($0)) }
+                    }
+
+                    if kind == .transfer {
+                        // El destino excluye la cuenta de origen: un traspaso a
+                        // la misma cuenta no significa nada y ademas
+                        // descuadraria el saldo, que suma las dos orillas.
+                        Picker("Hasta", selection: $counterpartAccount) {
+                            Text("Ninguna").tag(Account?.none)
+                            ForEach(activeAccounts.filter { $0.id != selectedAccount?.id }) {
+                                Text($0.name).tag(Account?.some($0))
+                            }
+                        }
+                    }
+
+                    DatePicker("Fecha", selection: $date, displayedComponents: .date)
+                    TextField("Concepto", text: $note)
+
+                    if !familyTags.isEmpty {
+                        Picker("Miembro", selection: $selectedFamilyTag) {
+                            Text("Ninguno").tag(FamilyTag?.none)
+                            ForEach(familyTags) { Text($0.name).tag(FamilyTag?.some($0)) }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Nuevo movimiento")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Guardar", action: save).disabled(!canSave)
+                }
+            }
+            .onAppear {
+                amountFocused = true
+                if selectedAccount == nil { selectedAccount = activeAccounts.first }
+            }
+        }
+    }
+
+    // MARK: - Atajos de categoria
+
+    private var activeAccounts: [Account] { accounts.filter { !$0.isArchived } }
+
+    private var categoriesForKind: [TransactionCategory] {
+        categories.filter { $0.kind == kind }
+    }
+
+    /// Las 6 mas usadas en los ultimos 200 movimientos del mismo tipo. Mirar
+    /// solo lo reciente hace que la lista siga a los habitos en vez de quedarse
+    /// anclada al historico.
+    private var suggestedCategories: [TransactionCategory] {
+        let recientes = recent.prefix(200).filter { $0.kind == kind }
+        var frecuencia: [UUID: Int] = [:]
+        for transaction in recientes {
+            guard let id = transaction.category?.id else { continue }
+            frecuencia[id, default: 0] += 1
+        }
+        return frecuencia
+            .sorted { $0.value > $1.value }
+            .prefix(6)
+            .compactMap { pair in categories.first { $0.id == pair.key } }
+    }
+
+    private var categoryShortcuts: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(suggestedCategories) { category in
+                    Button {
+                        selectedCategory = category
+                    } label: {
+                        Label(category.name, systemImage: category.symbolName)
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Color(hex: category.colorHex)
+                                    .opacity(selectedCategory?.id == category.id ? 0.35 : 0.15),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    // MARK: - Guardar
+
+    /// El teclado decimal escribe con la coma del idioma del movil, asi que se
+    /// acepta coma o punto y se normaliza antes de parsear con locale POSIX.
+    private var parsedAmount: Decimal? {
+        let normalized = amountText
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        guard let value = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
+              value > 0 else { return nil }
+        return value
+    }
+
+    private var canSave: Bool {
+        guard parsedAmount != nil, selectedAccount != nil else { return false }
+        if kind == .transfer { return counterpartAccount != nil }
+        return true
+    }
+
+    private func save() {
+        guard let amount = parsedAmount else { return }
+        let transaction = Transaction(
+            date: date,
+            amount: amount,
+            kind: kind,
+            note: note,
+            account: selectedAccount,
+            counterpartAccount: kind == .transfer ? counterpartAccount : nil,
+            category: kind == .transfer ? nil : selectedCategory,
+            familyTag: selectedFamilyTag
+        )
+        context.insert(transaction)
+        try? context.save()
+        dismiss()
+    }
+}

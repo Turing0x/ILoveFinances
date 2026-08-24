@@ -20,9 +20,38 @@ settings:
     SWIFT_EMIT_LOC_STRINGS: YES
 
 targets:
-  # Target DESECHABLE. Se borra al cerrar la Fase 0; su valor queda en
-  # docs/fase0-resultados.md. El target real de la app nace en la Fase 1,
-  # cuando ya se sepa de que tipo son los campos de dinero.
+  ILoveFinances:
+    type: application
+    platform: iOS
+    sources:
+      - path: ILoveFinances
+        # Sin esto XcodeGen los copiaria ademas como recursos dentro del bundle.
+        excludes:
+          - "Resources/Info.plist"
+          - "Resources/*.entitlements"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.threedots.ilovefinances
+        PRODUCT_NAME: ILoveFinances
+        INFOPLIST_FILE: ILoveFinances/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ILoveFinances/Resources/ILoveFinances.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+
+  ILoveFinancesTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ILoveFinancesTests
+    dependencies:
+      - target: ILoveFinances
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.threedots.ilovefinances.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  # Target DESECHABLE de la Fase 0. Se borra cuando el esquema del contenedor
+  # spike este desplegado a Production. Su valor esta en docs/fase0-resultados.md.
   Spike:
     type: application
     platform: iOS
@@ -36,3 +65,14 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Spike/Spike.entitlements
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
+
+schemes:
+  ILoveFinances:
+    build:
+      targets:
+        ILoveFinances: all
+    test:
+      targets:
+        - ILoveFinancesTests
+    run:
+      config: Debug

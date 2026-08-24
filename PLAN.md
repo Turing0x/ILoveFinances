@@ -97,7 +97,7 @@ ILoveFinancesGF/
 ├── Models/
 │   ├── Account.swift
 │   ├── Transaction.swift
-│   ├── Category.swift
+│   ├── TransactionCategory.swift
 │   ├── FamilyTag.swift
 │   ├── RecurringBill.swift
 │   ├── Asset.swift
@@ -139,7 +139,7 @@ ILoveFinancesGF/
 - **No se puede usar `@Attribute(.unique)`.** La unicidad hay que garantizarla en código (ver deduplicación de CSV, §4).
 - **Todas las relaciones deben ser opcionales** y tener su inversa declarada.
 - **No hay `deleteRule: .deny`.** Usar `.nullify` y controlar el borrado en la UI.
-- **Nada de relaciones auto-referenciales.** Una entidad que se relaciona consigo misma (el caso clásico: `Category.parent` / `Category.children`) es históricamente frágil en `NSPersistentCloudKitContainer`. La jerarquía de categorías se modela con `parentID: UUID?` plano y se resuelve en código (§3).
+- **Nada de relaciones auto-referenciales.** Una entidad que se relaciona consigo misma (el caso clásico: `TransactionCategory.parent` / `TransactionCategory.children`) es históricamente frágil en `NSPersistentCloudKitContainer`. La jerarquía de categorías se modela con `parentID: UUID?` plano y se resuelve en código (§3).
 
 Conviene un target de debug con contenedor solo local para desarrollar rápido sin depender de la cuenta de iCloud.
 
@@ -211,6 +211,10 @@ final class Account {
     @Relationship(deleteRule: .nullify, inverse: \Transaction.counterpartAccount)
     var incomingTransfers: [Transaction]? = []
 
+    /// Inversa de ImportProfile.account. Sin usar hasta la Fase 3, obligatoria ya.
+    @Relationship(deleteRule: .nullify, inverse: \ImportProfile.account)
+    var importProfiles: [ImportProfile]? = []
+
     var type: AccountType {
         get { AccountType(rawValue: typeRaw) ?? .checking }
         set { typeRaw = newValue.rawValue }
@@ -250,7 +254,7 @@ final class Transaction {
     var receiptData: Data?                    // foto de ticket, @Attribute(.externalStorage)
 
     var account: Account?
-    var category: Category?
+    var category: TransactionCategory?
     var familyTag: FamilyTag?
     var recurringBill: RecurringBill?
 
@@ -303,11 +307,13 @@ Esto tiene dos consecuencias que hay que respetar en todo el código, y son la c
 
 `receiptData` con `@Attribute(.externalStorage)` para que las fotos no engorden el store. Cuidado: CloudKit tiene límites de tamaño por registro; comprimir a JPEG ~0.6 antes de guardar.
 
-#### `Category` — categoría
+#### `TransactionCategory` — categoría
+
+**No se llama `Category`**, y el motivo se descubrió al compilar en la Fase 1: el runtime de Objective-C exporta su propio tipo `Category` (`objc/runtime.h`), y en cuanto ese header entra en ámbito cualquier uso genérico —`FetchDescriptor<Category>`— queda ambiguo y no compila. La app llegó a compilar con el nombre corto por casualidad; bastaba un `import` de más para romperla. Renombrar salía gratis entonces y sería **imposible** después: el `RecordType` de CloudKit no se puede borrar ni renombrar una vez desplegado a Production.
 
 ```swift
 @Model
-final class Category {
+final class TransactionCategory {
     var id: UUID = UUID()
     var name: String = ""
     var symbolName: String = "tag"     // SF Symbol
@@ -317,13 +323,17 @@ final class Category {
     var sortOrder: Int = 0
 
     /// Jerarquía por ID plano, NO por relación auto-referencial.
-    /// `Category.parent` + `Category.children` es el patrón natural en SwiftData,
+    /// `TransactionCategory.parent` + `TransactionCategory.children` es el patrón natural en SwiftData,
     /// pero las relaciones de una entidad consigo misma son frágiles bajo
     /// NSPersistentCloudKitContainer. Con dos niveles fijos, un UUID sale más barato.
     var parentID: UUID?
 
     @Relationship(deleteRule: .nullify, inverse: \Transaction.category)
     var transactions: [Transaction]? = []
+
+    /// Inversa de ImportRule.category, obligatoria para CloudKit.
+    @Relationship(deleteRule: .nullify, inverse: \ImportRule.category)
+    var importRules: [ImportRule]? = []
 
     var isSubcategory: Bool { parentID != nil }
 }
@@ -353,6 +363,10 @@ final class FamilyTag {
 
     @Relationship(deleteRule: .nullify, inverse: \Transaction.familyTag)
     var transactions: [Transaction]? = []
+
+    /// Inversa de ImportRule.familyTag, obligatoria para CloudKit.
+    @Relationship(deleteRule: .nullify, inverse: \ImportRule.familyTag)
+    var importRules: [ImportRule]? = []
 }
 ```
 
@@ -376,7 +390,7 @@ final class RecurringBill {
     var notificationID: String?              // identificador en UNUserNotificationCenter
 
     var account: Account?
-    var category: Category?
+    var category: TransactionCategory?
     var familyTag: FamilyTag?
 
     @Relationship(deleteRule: .nullify, inverse: \Transaction.recurringBill)
@@ -535,29 +549,31 @@ final class ImportRule {
     var matchCount: Int = 0                  // cuántas veces ha acertado, para depurar reglas
     var createdAt: Date = Date()
 
-    var category: Category?
+    var category: TransactionCategory?
     var familyTag: FamilyTag?                // opcional: además de categorizar, atribuye
 }
 ```
 
 Ambas entidades estaban usadas a fondo en §4 pero ausentes del modelo. Como el esquema de CloudKit en Production es aditivo y frágil de cambiar, **entran en el esquema v1 de la Fase 1 aunque no se usen hasta la Fase 3**. Una tabla vacía no cuesta nada; añadir una entidad después de tener datos reales sincronizados, sí.
 
+Y la decisión ya se pagó sola. Sus tres relaciones —`ImportProfile.account`, `ImportRule.category`, `ImportRule.familyTag`— **no tenían inversa declarada** en la primera versión de este documento. CloudKit rechaza el store entero por eso, y no al compilar: en ejecución, con un `Store failed to load` que nombra las tres. Escribirlas en la Fase 1 convirtió un fallo de la Fase 3 con datos reales dentro en media hora de trabajo. Las inversas ya están arriba, en `Account`, `TransactionCategory` y `FamilyTag`.
+
 ### Diagrama de relaciones
 
 ```
-Account 1──* Transaction *──1 Category   (jerarquía por parentID: UUID?, sin relación)
+Account 1──* Transaction *──1 TransactionCategory   (jerarquía por parentID: UUID?, sin relación)
    │              *──1 FamilyTag
    │              *──1 RecurringBill
    │
    └─1──* Asset 1──* InvestmentTrade
               1──* PriceQuote
 
-RecurringBill *──1 Account, *──1 Category, *──1 FamilyTag
+RecurringBill *──1 Account, *──1 TransactionCategory, *──1 FamilyTag
 Transaction   *──1 counterpartAccount  (solo kind == .transfer)
                └── inversa: Account.incomingTransfers
 
 ImportProfile *──1 Account
-ImportRule    *──1 Category, *──1 FamilyTag
+ImportRule    *──1 TransactionCategory, *──1 FamilyTag
 ```
 
 ---
@@ -785,7 +801,7 @@ No era una fase de producto: era la que evitaba rehacer el modelo con datos real
 
 ### Fase 1 — MVP: transacciones, categorías, dashboard · SIGUIENTE
 
-Alcance: entidades `Account`, `Transaction`, `Category`, `FamilyTag` — **y `ImportProfile` + `ImportRule` vacías**, para que el esquema v1 ya las contenga (§3). Alta/edición/borrado manual. Lista con filtros y búsqueda. Dashboard con saldo, ingresos vs gastos y gasto por categoría. CloudKit funcionando. Categorías sembradas al primer arranque. `VersionedSchema` desde el primer commit. **Export CSV de toda la base de datos**, manual y automático a iCloud Drive.
+Alcance: entidades `Account`, `Transaction`, `TransactionCategory`, `FamilyTag` — **y `ImportProfile` + `ImportRule` vacías**, para que el esquema v1 ya las contenga (§3). Alta/edición/borrado manual. Lista con filtros y búsqueda. Dashboard con saldo, ingresos vs gastos y gasto por categoría. CloudKit funcionando. Categorías sembradas al primer arranque. `VersionedSchema` desde el primer commit. **Export CSV de toda la base de datos, manual**: un botón en Ajustes que exporta una carpeta con cuatro CSV, y su restauración. El volcado automático queda descartado (ver §8).
 
 **Hecho cuando:**
 
@@ -851,6 +867,8 @@ Widget de pantalla de inicio con el gasto del mes. Presupuestos por categoría c
 
 No hay QA ni usuarios que reporten fallos: un error de céntimos o un coste medio mal calculado no se detecta hasta que se toma una decisión con un número falso. Las pruebas cubren **el cálculo, no la UI**.
 
+Framework: **Swift Testing** (`@Test`, `#expect`, `arguments:`). Las tablas de casos de aquí abajo son literalmente tablas, y con `arguments:` cada fila falla por separado y dice cuál — con un bucle dentro de un test, solo sabes que algo falló.
+
 **Lo que se prueba, y por qué justo esto:** los servicios son funciones puras sobre valores (§2), lo cual los hace baratos de probar sin levantar un `ModelContainer`.
 
 | Objetivo | Casos mínimos |
@@ -861,7 +879,7 @@ No hay QA ni usuarios que reporten fallos: un error de céntimos o un coste medi
 | **Saldos y traspasos** | Un `.transfer` de 200 € resta 200 en origen, suma 200 en destino, y aporta 0 al gasto del periodo. |
 | **Deduplicación** | Dos filas idénticas en el mismo CSV se importan las dos; reimportar el fichero entero no crea ninguna. |
 | **`PortfolioService`** | Compra → venta parcial → split → dividendo, en ese orden, verificando cantidad, coste medio, coste total y P&L realizado tras cada paso contra cifras calculadas a mano. |
-| **Invariante de CloudKit** | Un test que recorra el esquema por reflexión y falle si algún atributo es no-opcional sin valor por defecto, o si hay una relación sin inversa. Barato, y evita descubrir el fallo cuando la sincronización deja de funcionar en silencio. |
+| **Invariante de CloudKit** | Un test que recorra el esquema por reflexión y falle si algún atributo es no-opcional sin valor por defecto, si hay una relación sin inversa, si alguna usa `.deny`, o si una entidad se relaciona consigo misma. **Ya se ha cobrado su primera pieza**: nombró las tres relaciones de `ImportProfile`/`ImportRule` a las que les faltaba la inversa, antes de que nadie tocara CloudKit. |
 
 Las pantallas se prueban a mano contra los criterios de "hecho cuando" de cada fase. Automatizar UI tests para un proyecto de una persona cuesta más de lo que ahorra.
 
@@ -883,7 +901,7 @@ Las pantallas se prueban a mano contra los criterios de "hecho cuando" de cada f
 | **Coste medio con decimales periódicos.** `costeTotal / cantidad` puede no ser exacto (p. ej. 100 € / 3 participaciones). | Medio | Mantener el coste medio a 6 decimales y **derivar siempre el coste total del acumulado**, nunca de `costeMedio × cantidad`. Redondear solo al mostrar. |
 | **CSV de banco que cambia de formato.** | Medio | Perfiles de importación por firma de cabeceras: si no coincide, se pide mapear de nuevo en vez de fallar. |
 | **Fotos de tickets y límites de CloudKit.** | Bajo | `@Attribute(.externalStorage)` + compresión JPEG antes de guardar. Poner un tope de tamaño. |
-| **Borrado propagado.** CloudKit sincroniza, no respalda: un borrado accidental desaparece también de la nube y de cualquier dispositivo futuro. | Alto | Export CSV automático a iCloud Drive, en la Fase 1, con restauración probada. |
+| **Borrado propagado.** CloudKit sincroniza, no respalda: un borrado accidental desaparece también de la nube y de cualquier dispositivo futuro. | Alto | Export CSV **manual** en la Fase 1, con restauración probada, más el aviso de antigüedad de la copia. Mitigación parcial y conscientemente aceptada: sin volcado automático, el riesgo depende de acordarse. |
 | **Conflictos de sincronización.** Ya no aplica con un solo dispositivo, pero reaparecería si algún día hay un segundo. | Muy bajo | CloudKit resuelve con last-writer-wins. Con un solo usuario es aceptable; no merece la pena implementar CRDT. |
 
 ### Decisiones cerradas
@@ -897,7 +915,7 @@ Las pantallas se prueban a mano contra los criterios de "hecho cuando" de cada f
 | 5 | **1 año de histórico importado** | Suficiente para comparativas mes a mes y año anterior. Cinco años dan gráficos bonitos y muchas horas de categorización manual. |
 | 6 | **Divisa: `currency` solo en `Asset` y `PriceQuote`** | El precio se guarda en su divisa nativa y se convierte al mostrar. Convertir al guardar destruye el dato real de mercado para siempre, y es irreversible. No abre multidivisa en transacciones: los gastos siguen siendo solo euros (§1). Aplicar antes de la Fase 4. |
 | 7 | **Solo iPhone** | Sin iPad no hay `NavigationSplitView` ni layout adaptativo: cada pantalla se diseña una vez. CloudKit se mantiene igual, pero su valor pasa a ser continuidad entre dispositivos y recuperación tras un cambio de móvil, no sincronización simultánea. |
-| 8 | **Copia de seguridad: export CSV a iCloud Drive, en la Fase 1** | CloudKit propaga los borrados. Es barato de implementar y es lo único que separa un despiste de perder años de datos. Con criterio de cierre explícito: la restauración tiene que estar probada. |
+| 8 | **Copia de seguridad: export CSV manual, en la Fase 1** | CloudKit propaga los borrados, así que hace falta una copia fuera de la nube. Se decidió **solo manual**, sin volcado automático. Contrapartida asumida: la copia solo existe cuando uno se acuerda, que es justo lo que el volcado automático cubría. Se compensa con «Última copia: hace N días» en Ajustes, en rojo a partir de 30 — hace visible el olvido, no lo evita. Criterio de cierre: la restauración tiene que estar probada. |
 
 ### Decisiones que siguen abiertas
 

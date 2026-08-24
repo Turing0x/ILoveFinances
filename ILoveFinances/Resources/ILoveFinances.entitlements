@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Contenedor real de la app. El esquema en Production es ADITIVO:
+	     se pueden anadir campos, no borrarlos ni cambiarles el tipo. -->
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.dev.threedots.ilovefinances</string>
+	</array>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+	<!-- Almacen clave-valor de iCloud: guarda la marca de "categorias ya
+	     sembradas", que tiene que sobrevivir a una reinstalacion. Sin este
+	     entitlement NSUbiquitousKeyValueStore devuelve false en silencio y la
+	     app resiembra en cada instalacion. -->
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

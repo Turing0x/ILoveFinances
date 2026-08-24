@@ -1,0 +1,130 @@
+[
+  {
+    "id": "4340f749-3521-53d8-b845-fe6e5a565f70",
+    "name": "Vivienda",
+    "symbolName": "house",
+    "colorHex": "#E8743B",
+    "kind": "expense",
+    "sortOrder": 0
+  },
+  {
+    "id": "b0382a20-e8df-5e8e-87c4-e4d2db92eb99",
+    "name": "Alimentación",
+    "symbolName": "cart",
+    "colorHex": "#4C9F70",
+    "kind": "expense",
+    "sortOrder": 1
+  },
+  {
+    "id": "47fcbe34-b3fd-5b7e-ae3f-119c49cf8b34",
+    "name": "Transporte",
+    "symbolName": "car",
+    "colorHex": "#3B7DD8",
+    "kind": "expense",
+    "sortOrder": 2
+  },
+  {
+    "id": "54e34a74-ba6a-55c5-bf47-046b6069fb4d",
+    "name": "Salud",
+    "symbolName": "cross.case",
+    "colorHex": "#D64550",
+    "kind": "expense",
+    "sortOrder": 3
+  },
+  {
+    "id": "0022ccac-ddf9-5dab-86af-a87d4ad043c3",
+    "name": "Educación",
+    "symbolName": "book",
+    "colorHex": "#8E6FC7",
+    "kind": "expense",
+    "sortOrder": 4
+  },
+  {
+    "id": "b1dba319-f3e3-5887-9324-070f005326a5",
+    "name": "Ocio",
+    "symbolName": "theatermasks",
+    "colorHex": "#E0A32E",
+    "kind": "expense",
+    "sortOrder": 5
+  },
+  {
+    "id": "b82860f6-794f-50ca-98ae-fe818ca4ddbf",
+    "name": "Suscripciones",
+    "symbolName": "repeat",
+    "colorHex": "#2FA8A0",
+    "kind": "expense",
+    "sortOrder": 6
+  },
+  {
+    "id": "21edcaf4-99bc-58f7-8f3f-cf3dfb8a0b65",
+    "name": "Seguros",
+    "symbolName": "shield",
+    "colorHex": "#6B7A8F",
+    "kind": "expense",
+    "sortOrder": 7
+  },
+  {
+    "id": "f7a1a440-cd1a-5580-a773-90eeb256ccfa",
+    "name": "Impuestos",
+    "symbolName": "building.columns",
+    "colorHex": "#9B5B3C",
+    "kind": "expense",
+    "sortOrder": 8
+  },
+  {
+    "id": "16f6ea73-2e6b-5008-82e4-57b498944263",
+    "name": "Otros",
+    "symbolName": "tag",
+    "colorHex": "#888888",
+    "kind": "expense",
+    "sortOrder": 9
+  },
+  {
+    "id": "f616779e-a719-5ad7-a947-27c7fbcb7701",
+    "name": "Nómina",
+    "symbolName": "briefcase",
+    "colorHex": "#2E9E5B",
+    "kind": "income",
+    "sortOrder": 0
+  },
+  {
+    "id": "899be6c7-7895-5a35-bbf5-656d27fd2239",
+    "name": "Autónomo",
+    "symbolName": "hammer",
+    "colorHex": "#3E8E7E",
+    "kind": "income",
+    "sortOrder": 1
+  },
+  {
+    "id": "4b60ca44-168e-5613-b0b3-55770d542525",
+    "name": "Alquiler",
+    "symbolName": "key",
+    "colorHex": "#5B8C5A",
+    "kind": "income",
+    "sortOrder": 2
+  },
+  {
+    "id": "7c668b13-cc38-5430-a7c5-3e320ce4158f",
+    "name": "Dividendos",
+    "symbolName": "chart.line.uptrend.xyaxis",
+    "colorHex": "#4A90D9",
+    "kind": "income",
+    "sortOrder": 3
+  },
+  {
+    "id": "298a5e75-378e-5517-affb-9c788e0c473a",
+    "name": "Devoluciones",
+    "symbolName": "arrow.uturn.backward",
+    "colorHex": "#7FA650",
+    "kind": "income",
+    "sortOrder": 4
+  },
+  {
+    "id": "c7299dc4-fac5-54b2-b21a-64ea83526fb2",
+    "name": "Otros",
+    "symbolName": "tag",
+    "colorHex": "#888888",
+    "kind": "income",
+    "sortOrder": 5
+  }
+]
