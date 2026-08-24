@@ -50,22 +50,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.threedots.ilovefinances.tests
         GENERATE_INFOPLIST_FILE: YES
 
-  # Target DESECHABLE de la Fase 0. Se borra cuando el esquema del contenedor
-  # spike este desplegado a Production. Su valor esta en docs/fase0-resultados.md.
-  Spike:
-    type: application
-    platform: iOS
-    sources:
-      - Spike
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.threedots.ilovefinances.spike
-        PRODUCT_NAME: Spike
-        INFOPLIST_FILE: Spike/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Spike/Spike.entitlements
-        TARGETED_DEVICE_FAMILY: "1"
-        GENERATE_INFOPLIST_FILE: NO
-
 schemes:
   ILoveFinances:
     build:

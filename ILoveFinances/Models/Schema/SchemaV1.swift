@@ -18,8 +18,10 @@ import SwiftData
 ///
 /// `Shop`, `GroceryProduct` y `PurchaseLine` se anadieron en la Fase 5 por el
 /// mismo motivo y dentro de la misma ventana: el esquema seguia sin desplegar a
-/// Production y sin un solo dato real. ESTA ES LA ULTIMA VEZ. En cuanto se
-/// despliegue, ampliar la v1 en sitio deja de ser una opcion.
+/// Production y sin un solo dato real. ESA VENTANA YA ESTA CERRADA: el esquema
+/// de estas diez entidades se desplego a Production el 24/08/2026. A partir de
+/// ahi, ampliar la v1 en sitio dejo de ser una opcion y cualquier cambio de
+/// modelo pide `SchemaV2` + un `MigrationStage`, con copia de seguridad antes.
 enum SchemaV1: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
 

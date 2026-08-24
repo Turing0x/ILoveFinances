@@ -160,9 +160,11 @@ Registrarlo exige un target que lo declare en sus entitlements, y el único que
 existe es el desechable, que no debe tocarlo. Nace con el target real en la
 Fase 1. Coste de aplazarlo: ninguno.
 
-**El target `Spike` sigue en el repositorio.** El plan preveía borrarlo al
-cerrar; se mantiene hasta que el despliegue a Production esté hecho, por si hay
-que volver a sembrar. Su valor está en este documento, no en el código.
+~~**El target `Spike` sigue en el repositorio.**~~ **Borrado el 24/08/2026**,
+tras desplegar a Production el esquema real de diez entidades, que era la
+condición que lo mantenía vivo. Su valor está en este documento, no en el
+código; el historial de git conserva los diez ficheros por si alguna vez hiciera
+falta releerlos.
 
 ---
 

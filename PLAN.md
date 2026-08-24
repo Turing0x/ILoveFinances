@@ -2,7 +2,7 @@
 
 App **iPhone** de finanzas familiares para uso personal de Raúl. SwiftUI + SwiftData, **iOS 26+**, euro como única divisa, sin backend propio.
 
-Estado del documento: **Fases 0, 1, 2 y 5 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). La Fase 3 puede empezar.
+Estado del documento: **Fases 0, 1, 2 y 5 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). **Esquema de diez entidades desplegado a CloudKit Production el 24/08/2026**: desde esa fecha, todo cambio de modelo exige `SchemaV2` + `MigrationStage`. La Fase 3 puede empezar.
 
 > La **Fase 5** (tickets de compra y comparador de precios) no estaba planificada y se adelanto a las Fases 3 y 4: necesitaba entrar en el esquema v1 **antes** del despliegue a Production, que es la ultima ventana en que se pueden anadir entidades en sitio. Ver la seccion de fases.
 
@@ -962,12 +962,12 @@ Solo una, y no bloquea nada hasta la Fase 4:
 
 Fases 0, 1, 2 y 5 cerradas. El siguiente paso es la Fase 3:
 
-0. **Desplegar el esquema a CloudKit Production.** La Fase 5 lo dejó en diez entidades y es el momento: a partir del despliegue, ampliar la v1 en sitio deja de ser una opción y cualquier cambio exige `SchemaV2` + `MigrationStage`.
-1. Revisar `ImportProfile` e `ImportRule` contra un CSV real del banco **antes** de escribir código: si falta un campo, se añade ahora con bump de `VersionedSchema`, no después de importar datos reales. El esquema de CloudKit en Production es aditivo y no se renombra.
+1. Revisar `ImportProfile` e `ImportRule` contra un CSV real del banco antes de escribir código. **Ya no hay ventana barata**: el esquema está desplegado a Production, así que cualquier campo que falte entra con `SchemaV2` + `MigrationStage` y copia de seguridad previa. Añadir campos sigue siendo legal; borrarlos o cambiarles el tipo, no.
 2. `CSVImportService`: parseo y detección de formato, con tests sobre ficheros reales (coma decimal, punto de millar, fechas del banco), verificando contra la columna de saldo del propio CSV.
 3. Deduplicación de dos niveles y deshacer por lote, antes de las pantallas. Es la parte que protege la base de datos.
 4. Pantalla de mapeo de columnas con guardado de perfil, y previsualización editable.
 5. Autocategorización por `ImportRule`, medida contra un extracto mensual típico (objetivo ≥70%).
-6. Borrar el target `Spike` si sigue vivo, una vez desplegado a Production el esquema del contenedor desechable.
+
+**Hecho ya, fuera de la lista:** el target `Spike` se borró el 24/08/2026, tras el despliegue a Production. Su valor está en `docs/fase0-resultados.md`, no en el código; el historial de git lo conserva.
 
 **Deuda arrastrada, aún abierta:** la entrada de cambios de CloudKit en **segundo plano** sigue sin probarse (viene de la Fase 0, §8).
