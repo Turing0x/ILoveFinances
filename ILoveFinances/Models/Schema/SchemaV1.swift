@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// Version 1 del esquema, con SIETE entidades.
+/// Version 1 del esquema, con DIEZ entidades.
 ///
 /// `ImportProfile` e `ImportRule` no se usan hasta la Fase 3 y estan aqui a
 /// proposito: el esquema de CloudKit en Production es ADITIVO e irreversible.
@@ -15,6 +15,11 @@ import SwiftData
 /// Contrapartida asumida entonces: un store local antiguo que no migrara en
 /// ligero se resolvia reinstalando. A partir de que haya datos reales esta via
 /// se cierra y cualquier cambio pide `SchemaV2` + `MigrationStage`.
+///
+/// `Shop`, `GroceryProduct` y `PurchaseLine` se anadieron en la Fase 5 por el
+/// mismo motivo y dentro de la misma ventana: el esquema seguia sin desplegar a
+/// Production y sin un solo dato real. ESTA ES LA ULTIMA VEZ. En cuanto se
+/// despliegue, ampliar la v1 en sitio deja de ser una opcion.
 enum SchemaV1: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
 
@@ -27,6 +32,9 @@ enum SchemaV1: VersionedSchema {
             ImportProfile.self,
             ImportRule.self,
             RecurringBill.self,
+            Shop.self,
+            GroceryProduct.self,
+            PurchaseLine.self,
         ]
     }
 }

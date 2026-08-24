@@ -28,7 +28,7 @@ struct BackupView: View {
                 Button("Exportar copia", systemImage: "square.and.arrow.up", action: export)
                 lastBackupRow
             } footer: {
-                Text("Una carpeta con un CSV por entidad: cuentas, categorías, miembros, movimientos y facturas. Se abren en Numbers y sirven para restaurar.")
+                Text("Una carpeta con un CSV por entidad: cuentas, categorías, miembros, movimientos, facturas, tiendas, productos y líneas de ticket. Se abren en Numbers y sirven para restaurar.")
             }
 
             Section {
@@ -72,7 +72,7 @@ struct BackupView: View {
             Button("Restaurar", role: .destructive, action: restore)
                 .disabled(confirmationText != Self.confirmationWord)
         } message: {
-            Text("Esto borra todos los movimientos, cuentas, categorías, miembros y facturas actuales, también en iCloud. Escribe \(Self.confirmationWord) para confirmar.")
+            Text("Esto borra todos los movimientos, cuentas, categorías, miembros, facturas y compras actuales, también en iCloud. Escribe \(Self.confirmationWord) para confirmar.")
         }
     }
 
@@ -145,7 +145,8 @@ struct BackupView: View {
             message = """
             Restaurado: \(summary.accounts) cuentas, \(summary.categories) categorías, \
             \(summary.familyTags) miembros, \(summary.transactions) movimientos, \
-            \(summary.recurringBills) facturas.
+            \(summary.recurringBills) facturas, \(summary.shops) tiendas, \
+            \(summary.products) productos, \(summary.purchaseLines) líneas de ticket.
             """
             // La restauracion cambia las facturas por completo, asi que los
             // avisos pendientes ya no describen nada real.

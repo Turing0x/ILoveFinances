@@ -231,4 +231,122 @@ struct BackupRoundTripTests {
         }
         #expect(try context.fetchCount(FetchDescriptor<Transaction>()) == antes)
     }
+
+    // MARK: - Compras (Fase 5)
+
+    /// Fixture APARTE, y no una ampliacion de `poblar`: seis tests dependen de
+    /// sus recuentos exactos, de los dos saldos y del array ordenado de
+    /// importes. Meterle un ticket los romperia todos a la vez.
+    @discardableResult
+    private func poblarCompras(_ context: ModelContext) throws -> Transaction {
+        let corriente = Account(name: "Corriente", type: .checking, openingBalance: .zero)
+        context.insert(corriente)
+
+        let tienda = Shop(name: "Mercadona de casa", note: "el de abajo")
+        let leche = GroceryProduct(name: "Leche entera Hacendado", comparisonUnit: .l)
+        let pan = GroceryProduct(name: "Pan de barra", comparisonUnit: .unit)
+        [tienda].forEach { context.insert($0) }
+        [leche, pan].forEach { context.insert($0) }
+
+        let lineas = [
+            PurchaseLine(rawName: "LECHE ENT 6X1L", quantity: 6, unit: .l,
+                         lineTotal: Decimal(string: "5.40")!, position: 0, product: leche),
+            PurchaseLine(rawName: "PAN BARRA", quantity: 1, unit: .unit,
+                         lineTotal: Decimal(string: "1.20")!, isOffer: true, position: 1, product: pan),
+            PurchaseLine(rawName: "QUESO LONCHAS 200G", quantity: 200, unit: .g,
+                         lineTotal: Decimal(string: "2.35")!, position: 2, product: nil),
+        ]
+
+        let ticket = Transaction(
+            date: Date(timeIntervalSince1970: 1_772_000_000),
+            amount: PurchaseService.linesTotal(lineas),
+            kind: .expense,
+            note: "Mercadona de casa",
+            account: corriente
+        )
+        ticket.isPurchaseTicket = true
+        ticket.shop = tienda
+        context.insert(ticket)
+        for linea in lineas {
+            context.insert(linea)
+            linea.transaction = ticket
+        }
+        try context.save()
+        return ticket
+    }
+
+    @Test("Un ticket con sus lineas vuelve entero y enlazado")
+    func comprasIdaYVuelta() throws {
+        let origen = try makeContext()
+        try poblarCompras(origen)
+
+        let ficheros = try BackupService.export(context: origen)
+
+        let destino = try makeContext()
+        let resumen = try BackupService.restoreReplacingAll(files: ficheros, context: destino)
+
+        #expect(resumen.shops == 1)
+        #expect(resumen.products == 2)
+        #expect(resumen.purchaseLines == 3)
+
+        let tickets = try destino.fetch(FetchDescriptor<Transaction>())
+        let ticket = try #require(tickets.first)
+        #expect(ticket.isPurchaseTicket)
+        #expect(ticket.shop?.name == "Mercadona de casa")
+        #expect(ticket.shop?.note == "el de abajo")
+        #expect(ticket.amount == Decimal(string: "8.95")!)
+
+        // El orden del papel se conserva.
+        let lineas = ticket.sortedLines
+        #expect(lineas.map(\.rawName) == ["LECHE ENT 6X1L", "PAN BARRA", "QUESO LONCHAS 200G"])
+
+        // Cantidades y unidades exactas: de ellas sale el precio comparable.
+        #expect(lineas[0].quantity == 6)
+        #expect(lineas[0].unit == .l)
+        #expect(lineas[0].lineTotal == Decimal(string: "5.40")!)
+        #expect(lineas[1].isOffer)
+        #expect(!lineas[0].isOffer)
+        #expect(lineas[2].quantity == 200)
+        #expect(lineas[2].unit == .g)
+
+        // Producto enlazado por UUID, y la linea sin producto sigue sin el.
+        #expect(lineas[0].product?.name == "Leche entera Hacendado")
+        #expect(lineas[0].product?.comparisonUnit == .l)
+        #expect(lineas[2].product == nil)
+
+        // Y el historial se puede reconstruir del todo tras restaurar.
+        let leche = try #require(lineas[0].product)
+        let historial = PurchaseService.history(of: leche)
+        #expect(historial.count == 1)
+        #expect(historial.first?.shop?.name == "Mercadona de casa")
+        #expect(historial.first?.unitPrice == Decimal(string: "0.9")!)
+    }
+
+    /// Hermano de `copiaAntiguaSinFacturas`: actualizar la app no puede
+    /// invalidar las copias hechas antes de actualizarla.
+    @Test("Una copia anterior a las compras sigue restaurando")
+    func copiaAntiguaSinCompras() throws {
+        let origen = try makeContext()
+        try poblarCompras(origen)
+
+        var ficheros = try BackupService.export(context: origen)
+        ficheros.removeValue(forKey: BackupService.FileName.shops)
+        ficheros.removeValue(forKey: BackupService.FileName.products)
+        ficheros.removeValue(forKey: BackupService.FileName.purchaseLines)
+
+        let destino = try makeContext()
+        let resumen = try BackupService.restoreReplacingAll(files: ficheros, context: destino)
+
+        #expect(resumen.shops == 0)
+        #expect(resumen.products == 0)
+        #expect(resumen.purchaseLines == 0)
+        #expect(resumen.transactions == 1)
+
+        let ticket = try #require(try destino.fetch(FetchDescriptor<Transaction>()).first)
+        #expect(ticket.shop == nil)
+        #expect(ticket.sortedLines.isEmpty)
+        // El gasto sobrevive aunque el detalle no: el dinero se gasto igual.
+        #expect(ticket.amount == Decimal(string: "8.95")!)
+    }
+
 }

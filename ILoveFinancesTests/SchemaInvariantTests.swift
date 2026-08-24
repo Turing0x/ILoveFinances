@@ -79,12 +79,34 @@ struct SchemaInvariantTests {
         #expect(infractores.isEmpty, "Auto-referencial: \(infractores.joined(separator: ", "))")
     }
 
-    @Test("El esquema v1 contiene las siete entidades, importacion y facturas incluidas")
-    func sieteEntidades() {
+    @Test("El esquema v1 contiene las diez entidades, importacion, facturas y compras incluidas")
+    func diezEntidades() {
         let nombres = Set(schema.entities.map(\.name))
         #expect(nombres == [
             "Account", "Transaction", "TransactionCategory",
             "FamilyTag", "ImportProfile", "ImportRule", "RecurringBill",
+            "Shop", "GroceryProduct", "PurchaseLine",
         ])
+    }
+
+    /// La casa usa `.nullify` en todas partes. `Transaction.purchaseLines` es
+    /// la unica excepcion y es deliberada (ver el comentario en `Transaction`):
+    /// una linea sin su ticket pierde fecha y tienda, las dos coordenadas del
+    /// historial de precios, y se queda como basura imposible de limpiar.
+    ///
+    /// Este test no comprueba que el modelo sea correcto: fija la desviacion,
+    /// para que "normalizarla" a `.nullify` mas adelante falle en rojo en vez
+    /// de llenar la base de lineas huerfanas en silencio.
+    @Test("La unica relacion .cascade es la de un ticket con sus lineas")
+    func unicoCascade() {
+        var cascadas: Set<String> = []
+
+        for entity in schema.entities {
+            for relationship in entity.relationships where relationship.deleteRule == .cascade {
+                cascadas.insert("\(entity.name).\(relationship.name)")
+            }
+        }
+
+        #expect(cascadas == ["Transaction.purchaseLines"])
     }
 }

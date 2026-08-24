@@ -18,6 +18,9 @@ struct RootView: View {
             Tab("Facturas", systemImage: "calendar.badge.clock") {
                 BillsView()
             }
+            Tab("Compras", systemImage: "cart") {
+                PurchasesView()
+            }
         }
         // Los avisos se reprograman al arrancar y en cada vuelta a primer
         // plano: la ventana es deslizante (60 dias) y solo avanza si alguien la

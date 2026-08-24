@@ -11,6 +11,8 @@ struct SettingsView: View {
                     NavigationLink("Cuentas") { AccountsView() }
                     NavigationLink("Categorías") { CategoriesView() }
                     NavigationLink("Miembros") { FamilyTagsView() }
+                    NavigationLink("Tiendas") { ShopsView() }
+                    NavigationLink("Productos") { ProductsView() }
                 }
                 Section {
                     NavigationLink("Copia de seguridad") { BackupView() }

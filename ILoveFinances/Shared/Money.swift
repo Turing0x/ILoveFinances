@@ -29,6 +29,15 @@ enum Money {
         return value < 0 ? "−\(text)" : "+\(text)"
     }
 
+    /// Precio por unidad de medida: "1,05 €/kg".
+    ///
+    /// Redondea a dos decimales SOLO al mostrar. El valor crudo es el que se
+    /// ordena y compara en `PurchaseService`: dos tiendas a 1,234 y 1,236 €/kg
+    /// empatarian si se redondease antes de ordenar.
+    static func formattedRate(_ value: Decimal, unit: String) -> String {
+        "\(formatted(rounded(value)))/\(unit)"
+    }
+
     /// Serializacion estable, para el CSV de la copia de seguridad.
     ///
     /// Locale POSIX fijo: un movil en castellano escribiria "0,1" y el parseo

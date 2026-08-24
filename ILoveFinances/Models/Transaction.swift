@@ -6,7 +6,7 @@ final class Transaction {
     /// `#Index` esta disponible con deployment target iOS 26 y se comprobo en
     /// la Fase 0 que compila. Cubre el listado ordenado por fecha y el filtro
     /// por tipo, que son las dos consultas de la pantalla de Movimientos.
-    #Index<Transaction>([\.date], [\.date, \.kindRaw])
+    #Index<Transaction>([\.date], [\.date, \.kindRaw], [\.isPurchaseTicket, \.date])
 
     var id: UUID = UUID()
     var date: Date = Date()
@@ -25,6 +25,16 @@ final class Transaction {
 
     // Marcadores
     var isRecurringInstance: Bool = false     // generada por una RecurringBill (Fase 2)
+
+    /// Este gasto es un ticket de compra con sus lineas detalladas (Fase 5).
+    ///
+    /// Marcador denormalizado, mismo patron que `isRecurringInstance`. Las dos
+    /// alternativas fallan: preguntar por `purchaseLines` no vacio es un
+    /// predicado sobre relacion, que es la parte fragil de SwiftData (ver
+    /// `TransactionFilter`), y preguntar por `shop != nil` es directamente
+    /// incorrecto, porque borrar la tienda pone `shop` a nil y el ticket
+    /// dejaria de serlo.
+    var isPurchaseTicket: Bool = false
 
     /// Ocurrencia concreta que paga esta transaccion, a las 00:00 del dia
     /// previsto de cargo — NO el dia en que se pago.
@@ -45,6 +55,20 @@ final class Transaction {
     var familyTag: FamilyTag?
     /// Inversa de `RecurringBill.payments`.
     var recurringBill: RecurringBill?
+    /// Inversa de `Shop.purchases` (Fase 5).
+    var shop: Shop?
+
+    /// Lineas del ticket (Fase 5).
+    ///
+    /// UNICA relacion `.cascade` del esquema, y la desviacion esta fijada por
+    /// un test para que nadie la "normalice" al `.nullify` de la casa. Una
+    /// linea sin su transaccion pierde a la vez la fecha y la tienda, que son
+    /// las dos coordenadas del historial de precios: deja de ser un dato y
+    /// pasa a ser basura consultable, imposible de limpiar desde la interfaz.
+    /// `.deny` no vale: esta prohibido por `SchemaInvariantTests` y ademas
+    /// bloquearia borrar un gasto normal.
+    @Relationship(deleteRule: .cascade, inverse: \PurchaseLine.transaction)
+    var purchaseLines: [PurchaseLine]? = []
 
     init(
         date: Date = Date(),
@@ -103,5 +127,13 @@ final class Transaction {
         case .expense:  return -amount
         case .transfer: return .zero
         }
+    }
+
+    /// Lineas del ticket en el orden en que venian en el papel (Fase 5).
+    ///
+    /// La relacion no garantiza orden, asi que ordenar por `position` es
+    /// obligatorio en cualquier sitio que las muestre.
+    var sortedLines: [PurchaseLine] {
+        (purchaseLines ?? []).sorted { $0.position < $1.position }
     }
 }

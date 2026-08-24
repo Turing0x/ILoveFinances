@@ -20,6 +20,9 @@ enum BackupService {
         static let familyTags = "family_tags.csv"
         static let transactions = "transactions.csv"
         static let recurringBills = "recurring_bills.csv"
+        static let shops = "shops.csv"
+        static let products = "products.csv"
+        static let purchaseLines = "purchase_lines.csv"
         static let manifest = "manifest.csv"
     }
 
@@ -48,16 +51,23 @@ enum BackupService {
         let familyTags = try context.fetch(FetchDescriptor<FamilyTag>())
         let transactions = try context.fetch(FetchDescriptor<Transaction>())
         let recurringBills = try context.fetch(FetchDescriptor<RecurringBill>())
+        let shops = try context.fetch(FetchDescriptor<Shop>())
+        let products = try context.fetch(FetchDescriptor<GroceryProduct>())
+        let purchaseLines = try context.fetch(FetchDescriptor<PurchaseLine>())
 
         return [
             FileName.manifest: CSVCodec.encode(
-                header: ["schemaVersion", "exportedAt", "accounts", "categories", "familyTags", "transactions", "recurringBills"],
+                header: [
+                    "schemaVersion", "exportedAt", "accounts", "categories", "familyTags",
+                    "transactions", "recurringBills", "shops", "products", "purchaseLines",
+                ],
                 rows: [[
                     "\(SchemaV1.versionIdentifier)",
                     CSVCodec.string(from: Date()),
                     "\(accounts.count)", "\(categories.count)",
                     "\(familyTags.count)", "\(transactions.count)",
                     "\(recurringBills.count)",
+                    "\(shops.count)", "\(products.count)", "\(purchaseLines.count)",
                 ]]
             ),
             FileName.accounts: CSVCodec.encode(
@@ -100,6 +110,7 @@ enum BackupService {
                     "accountID", "counterpartAccountID", "categoryID", "familyTagID",
                     "isRecurringInstance", "recurringBillID", "occurrenceDate",
                     "importHash", "importBatchID", "createdAt",
+                    "shopID", "isPurchaseTicket",
                 ],
                 rows: transactions.map { transaction in
                     [
@@ -119,6 +130,8 @@ enum BackupService {
                         transaction.importHash ?? "",
                         CSVCodec.string(from: transaction.importBatchID),
                         CSVCodec.string(from: transaction.createdAt),
+                        CSVCodec.string(from: transaction.shop?.id),
+                        CSVCodec.string(from: transaction.isPurchaseTicket),
                     ]
                 }
             ),
@@ -146,6 +159,48 @@ enum BackupService {
                     ]
                 }
             ),
+            FileName.shops: CSVCodec.encode(
+                header: ["id", "name", "note", "colorHex", "isArchived", "sortOrder", "createdAt"],
+                rows: shops.map { shop in
+                    [
+                        shop.id.uuidString, shop.name, shop.note, shop.colorHex,
+                        CSVCodec.string(from: shop.isArchived),
+                        "\(shop.sortOrder)",
+                        CSVCodec.string(from: shop.createdAt),
+                    ]
+                }
+            ),
+            FileName.products: CSVCodec.encode(
+                header: ["id", "name", "comparisonUnit", "symbolName", "note", "isArchived", "createdAt"],
+                rows: products.map { product in
+                    [
+                        product.id.uuidString, product.name, product.comparisonUnitRaw,
+                        product.symbolName, product.note,
+                        CSVCodec.string(from: product.isArchived),
+                        CSVCodec.string(from: product.createdAt),
+                    ]
+                }
+            ),
+            FileName.purchaseLines: CSVCodec.encode(
+                header: [
+                    "id", "transactionID", "productID", "rawName", "quantity", "unit",
+                    "lineTotal", "isOffer", "position", "createdAt",
+                ],
+                rows: purchaseLines.map { line in
+                    [
+                        line.id.uuidString,
+                        CSVCodec.string(from: line.transaction?.id),
+                        CSVCodec.string(from: line.product?.id),
+                        line.rawName,
+                        CSVCodec.string(from: line.quantity),
+                        line.unitRaw,
+                        CSVCodec.string(from: line.lineTotal),
+                        CSVCodec.string(from: line.isOffer),
+                        "\(line.position)",
+                        CSVCodec.string(from: line.createdAt),
+                    ]
+                }
+            ),
         ]
     }
 
@@ -157,6 +212,9 @@ enum BackupService {
         var familyTags = 0
         var transactions = 0
         var recurringBills = 0
+        var shops = 0
+        var products = 0
+        var purchaseLines = 0
     }
 
     /// **Reemplaza todo.** Borra lo que haya y reconstruye desde el CSV.
@@ -177,13 +235,62 @@ enum BackupService {
         // no fichero corrupto. Si esto fuese `missingFile`, actualizar la app
         // invalidaria las copias hechas antes de actualizarla.
         let billRows = (try? table(FileName.recurringBills, in: files).rows) ?? []
+        // Lo mismo para las compras de la Fase 5: una copia anterior no las
+        // trae y tiene que seguir restaurando.
+        let shopRows = (try? table(FileName.shops, in: files).rows) ?? []
+        let productRows = (try? table(FileName.products, in: files).rows) ?? []
+        let lineRows = (try? table(FileName.purchaseLines, in: files).rows) ?? []
 
         // Punto de no retorno.
+        // `PurchaseLine` va EXPLICITO y primero: `delete(model:)` es un borrado
+        // por lote y no ejecuta el `.cascade` de `Transaction.purchaseLines`.
+        // Dejarlo implicito arriesga lineas colgadas sin ticket.
+        try context.delete(model: PurchaseLine.self)
         try context.delete(model: Transaction.self)
         try context.delete(model: RecurringBill.self)
         try context.delete(model: Account.self)
         try context.delete(model: TransactionCategory.self)
         try context.delete(model: FamilyTag.self)
+        try context.delete(model: GroceryProduct.self)
+        try context.delete(model: Shop.self)
+
+        // Tiendas y productos primero: no dependen de nadie, y las
+        // transacciones y las lineas los buscan por UUID.
+        var shopsByID: [UUID: Shop] = [:]
+        for row in shopRows {
+            guard let id = CSVCodec.uuid(from: row["id"] ?? "") else {
+                throw BackupError.malformedRow(file: FileName.shops, detail: "id vacio o invalido")
+            }
+            let shop = Shop(
+                name: row["name"] ?? "",
+                note: row["note"] ?? "",
+                colorHex: row["colorHex"] ?? "#7FB069",
+                sortOrder: Int(row["sortOrder"] ?? "") ?? 0
+            )
+            shop.id = id
+            shop.isArchived = CSVCodec.bool(from: row["isArchived"] ?? "")
+            if let created = CSVCodec.date(from: row["createdAt"] ?? "") { shop.createdAt = created }
+            context.insert(shop)
+            shopsByID[id] = shop
+        }
+
+        var productsByID: [UUID: GroceryProduct] = [:]
+        for row in productRows {
+            guard let id = CSVCodec.uuid(from: row["id"] ?? "") else {
+                throw BackupError.malformedRow(file: FileName.products, detail: "id vacio o invalido")
+            }
+            let product = GroceryProduct(
+                name: row["name"] ?? "",
+                comparisonUnit: UnitOfMeasure(rawValue: row["comparisonUnit"] ?? "") ?? .unit,
+                symbolName: row["symbolName"] ?? "cart",
+                note: row["note"] ?? ""
+            )
+            product.id = id
+            product.isArchived = CSVCodec.bool(from: row["isArchived"] ?? "")
+            if let created = CSVCodec.date(from: row["createdAt"] ?? "") { product.createdAt = created }
+            context.insert(product)
+            productsByID[id] = product
+        }
 
         var accountsByID: [UUID: Account] = [:]
         for row in accountRows {
@@ -270,6 +377,7 @@ enum BackupService {
             billsByID[id] = bill
         }
 
+        var transactionsByID: [UUID: Transaction] = [:]
         for row in transactionRows {
             guard let id = CSVCodec.uuid(from: row["id"] ?? "") else {
                 throw BackupError.malformedRow(file: FileName.transactions, detail: "id vacio o invalido")
@@ -294,8 +402,35 @@ enum BackupService {
             transaction.occurrenceDate = CSVCodec.date(from: row["occurrenceDate"] ?? "")
             transaction.importHash = emptyToNil(row["importHash"])
             transaction.importBatchID = CSVCodec.uuid(from: row["importBatchID"] ?? "")
+            transaction.shop = CSVCodec.uuid(from: row["shopID"] ?? "").flatMap { shopsByID[$0] }
+            transaction.isPurchaseTicket = CSVCodec.bool(from: row["isPurchaseTicket"] ?? "")
             if let created = CSVCodec.date(from: row["createdAt"] ?? "") { transaction.createdAt = created }
             context.insert(transaction)
+            transactionsByID[id] = transaction
+        }
+
+        // Las lineas van las ULTIMAS: necesitan su ticket y su producto ya
+        // insertados para engancharse a los dos por UUID.
+        for row in lineRows {
+            guard let id = CSVCodec.uuid(from: row["id"] ?? "") else {
+                throw BackupError.malformedRow(file: FileName.purchaseLines, detail: "id vacio o invalido")
+            }
+            guard let lineTotal = CSVCodec.decimal(from: row["lineTotal"] ?? "") else {
+                throw BackupError.malformedRow(file: FileName.purchaseLines, detail: "importe ilegible en \(id)")
+            }
+            let line = PurchaseLine(
+                rawName: row["rawName"] ?? "",
+                quantity: CSVCodec.decimal(from: row["quantity"] ?? "") ?? .zero,
+                unit: UnitOfMeasure(rawValue: row["unit"] ?? "") ?? .unit,
+                lineTotal: lineTotal,
+                isOffer: CSVCodec.bool(from: row["isOffer"] ?? ""),
+                position: Int(row["position"] ?? "") ?? 0,
+                product: CSVCodec.uuid(from: row["productID"] ?? "").flatMap { productsByID[$0] }
+            )
+            line.id = id
+            if let created = CSVCodec.date(from: row["createdAt"] ?? "") { line.createdAt = created }
+            context.insert(line)
+            line.transaction = CSVCodec.uuid(from: row["transactionID"] ?? "").flatMap { transactionsByID[$0] }
         }
 
         try context.save()
@@ -305,7 +440,10 @@ enum BackupService {
             categories: categoryRows.count,
             familyTags: familyTagRows.count,
             transactions: transactionRows.count,
-            recurringBills: billRows.count
+            recurringBills: billRows.count,
+            shops: shopRows.count,
+            products: productRows.count,
+            purchaseLines: lineRows.count
         )
     }
 

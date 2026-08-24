@@ -63,6 +63,25 @@ struct TransactionDetailView: View {
                 }
             }
 
+            if transaction.isPurchaseTicket {
+                Section {
+                    NavigationLink {
+                        TicketDetailView(ticket: transaction)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(transaction.shop?.name ?? "Sin tienda")
+                            Text("^[\(transaction.sortedLines.count) línea](inflect: true) con su precio por unidad")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Compra")
+                } footer: {
+                    Text("El importe de este gasto es la suma de las líneas del ticket. Para cambiarlo, edita las líneas.")
+                }
+            }
+
             if transaction.kind == .transfer {
                 Section {
                     Text("Un traspaso entre cuentas propias no cuenta como gasto ni como ingreso: mueve el saldo de las dos cuentas y aporta cero al resumen del periodo.")

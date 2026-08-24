@@ -2,7 +2,9 @@
 
 App **iPhone** de finanzas familiares para uso personal de Raúl. SwiftUI + SwiftData, **iOS 26+**, euro como única divisa, sin backend propio.
 
-Estado del documento: **Fases 0, 1 y 2 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). La Fase 3 puede empezar.
+Estado del documento: **Fases 0, 1, 2 y 5 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). La Fase 3 puede empezar.
+
+> La **Fase 5** (tickets de compra y comparador de precios) no estaba planificada y se adelanto a las Fases 3 y 4: necesitaba entrar en el esquema v1 **antes** del despliegue a Production, que es la ultima ventana en que se pueden anadir entidades en sitio. Ver la seccion de fases.
 
 **Decisiones cerradas** (ver §8): solo iPhone · coste medio ponderado · tarjetas de crédito como `Account` · efectivo como cuenta `cash` con ajuste mensual · precios de inversión híbridos empezando en manual · backup a CSV en Fase 1 · 1 año de histórico importado.
 
@@ -828,7 +830,7 @@ Alcance: entidad `RecurringBill`, cálculo de ocurrencias, pantalla de facturas,
 - Desactivar una factura cancela sus notificaciones pendientes.
 - Con 20 facturas activas dadas de alta, `pendingNotificationRequests` nunca supera 64 (ver riesgo de cupo en §8).
 
-### Fase 3 — Importación de CSV · SIGUIENTE
+### Fase 3 — Importación de CSV · SIGUIENTE (tras la Fase 5)
 
 Alcance: `CSVImportService` completo, detección de formato, pantalla de mapeo con perfiles guardados, deduplicación de dos niveles, previsualización editable, autocategorización por reglas, deshacer importación por lote.
 
@@ -857,9 +859,40 @@ Alcance: `Asset`, `InvestmentTrade`, `PriceQuote`, `PortfolioService` con coste 
 - Actualizar el precio de un activo dos veces el mismo día deja **una** `PriceQuote`, no dos.
 - Si el precio proviene de API: un fallo de red no rompe la pantalla, muestra el último precio conocido con su fecha.
 
+### Fase 5 — Tickets de compra y comparador de precios · CERRADA (24/08/2026)
+
+**No estaba en este plan.** Se adelantó a las Fases 3 y 4 por una razón de esquema, no de prioridad: añade tres entidades, y la única ventana en la que eso es barato es antes de desplegar a CloudKit Production. Después habría exigido `SchemaV2` + `MigrationStage` con datos reales sincronizados.
+
+Alcance: entidades `Shop`, `GroceryProduct` y `PurchaseLine`, más `Transaction.shop` / `isPurchaseTicket` / `purchaseLines`. Enum `UnitOfMeasure` con normalización por dimensión. `PurchaseService` con precio por unidad de medida y ranking por tienda. Cuarta pestaña "Compras" con alta de tickets, detalle y comparador. Tiendas y productos en Ajustes. Copia de seguridad ampliada con tres CSV nuevos.
+
+**Decisiones cerradas de la fase:**
+
+| Decisión | Motivo |
+|---|---|
+| El **`Transaction` ES el ticket**, sin entidad de cabecera aparte | El gasto ya tiene fecha, importe, cuenta y categoría. Así el dashboard, los saldos y los filtros siguen funcionando sin tocarlos. Y en la Fase 3, una fila importada del banco se podrá detallar sin reconciliar nada. |
+| Nombres `Shop` y `GroceryProduct` | `StoreKit` exporta su propio `Product`. Es el mismo problema que dejó a `TransactionCategory` sin llamarse `Category`, y renombrar tras Production es imposible. |
+| **Entrada solo manual.** Nunca foto ni OCR | Decisión del usuario, sin matices. |
+| **Cantidad + unidad** en cada línea | Sin ellas el comparador es deshonesto: 1,20 € no dice nada si no se sabe si son 250 g o 500 g. |
+| El **total se calcula** sumando las líneas | Un campo menos que teclear y descuadre imposible. Contrapartida asumida: un error de tecleo entra sin aviso. |
+| **Sin líneas de ajuste** en la interfaz | Contrapartida asumida y consciente: un cupón global del super no se puede representar, y el gasto de esos tickets queda por encima de lo pagado. El esquema **sí** las admite (`lineTotal` acepta negativos, `product` es opcional), así que activarlas más adelante no exige migrar nada. |
+| **Producto creado al vuelo** al teclear uno nuevo | Interrumpir con una confirmación por producto nuevo es lo que hace abandonar en el primer ticket, que es todo productos nuevos. Los duplicados se limpian luego en Ajustes. |
+| `Transaction.purchaseLines` con **`.cascade`** | Única excepción al `.nullify` de la casa, fijada por un test. Una línea sin ticket pierde fecha y tienda a la vez y se queda como basura consultable. |
+| Marca **dentro del nombre** del producto | "Leche entera Hacendado" y "Leche entera Pascual" no cuestan lo mismo. Un campo de marca obligaría a decidir si el comparador cruza marcas, y esa decisión no tiene respuesta buena. |
+| **Sin tabla de alias** de producto | `PurchaseLine.rawName` guarda lo que decía el ticket en cada línea: una tabla de alias se puede derivar de ahí más adelante sin tocar el esquema. |
+
+**Hecho cuando:**
+
+- Apunto el ticket entero del super sin que teclear se haga cuesta arriba, y el total cuadra con el papel.
+- El gasto aparece en Resumen y Movimientos como cualquier otro, sin nada roto.
+- Busco "pan" y veo cada compra con fecha, tienda y precio por unidad de medida, con la tienda más barata la primera.
+- Un formato de 750 g y otro de 1 kg se comparan bien: gana el más barato por kilo, no el de importe menor.
+- Las ofertas quedan fuera del ranking salvo que las incluya.
+- Borrar un ticket borra sus líneas; borrar un producto **no** borra el histórico.
+- La copia CSV exporta y restaura los tickets enteros, y una copia anterior a esta fase sigue restaurando.
+
 ### Fuera de fases (candidatos futuros)
 
-Widget de pantalla de inicio con el gasto del mes. Presupuestos por categoría con aviso al superar. Atajos de Siri / App Intents para "apunta 12 euros en comida". Exportación a PDF del resumen anual. Face ID al abrir. Cálculo FIFO paralelo al coste medio, si algún día las cifras van a la declaración.
+Widget de pantalla de inicio con el gasto del mes. Presupuestos por categoría con aviso al superar. Líneas de ajuste en los tickets (cupón global, bolsa, envase): el esquema ya las admite, solo falta ofrecerlas en la interfaz. Atajos de Siri / App Intents para "apunta 12 euros en comida". Exportación a PDF del resumen anual. Face ID al abrir. Cálculo FIFO paralelo al coste medio, si algún día las cifras van a la declaración.
 
 ---
 
@@ -927,8 +960,9 @@ Solo una, y no bloquea nada hasta la Fase 4:
 
 ## 9. Por dónde empezar
 
-Fases 0, 1 y 2 cerradas. El siguiente paso es la Fase 3:
+Fases 0, 1, 2 y 5 cerradas. El siguiente paso es la Fase 3:
 
+0. **Desplegar el esquema a CloudKit Production.** La Fase 5 lo dejó en diez entidades y es el momento: a partir del despliegue, ampliar la v1 en sitio deja de ser una opción y cualquier cambio exige `SchemaV2` + `MigrationStage`.
 1. Revisar `ImportProfile` e `ImportRule` contra un CSV real del banco **antes** de escribir código: si falta un campo, se añade ahora con bump de `VersionedSchema`, no después de importar datos reales. El esquema de CloudKit en Production es aditivo y no se renombra.
 2. `CSVImportService`: parseo y detección de formato, con tests sobre ficheros reales (coma decimal, punto de millar, fechas del banco), verificando contra la columna de saldo del propio CSV.
 3. Deduplicación de dos niveles y deshacer por lote, antes de las pantallas. Es la parte que protege la base de datos.
