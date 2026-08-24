@@ -17,11 +17,6 @@ struct SettingsView: View {
                 Section {
                     NavigationLink("Copia de seguridad") { BackupView() }
                 }
-                #if DEBUG
-                Section("Depuración") {
-                    NavigationLink("Generar datos de prueba") { SampleDataView() }
-                }
-                #endif
             }
             .navigationTitle("Ajustes")
             .toolbar {
