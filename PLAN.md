@@ -2,7 +2,7 @@
 
 App **iPhone** de finanzas familiares para uso personal de Raúl. SwiftUI + SwiftData, **iOS 26+**, euro como única divisa, sin backend propio.
 
-Estado del documento: **Fase 0 cerrada** (24 de agosto de 2026, ver `docs/fase0-resultados.md`). La Fase 1 puede empezar.
+Estado del documento: **Fases 0, 1 y 2 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). La Fase 3 puede empezar.
 
 **Decisiones cerradas** (ver §8): solo iPhone · coste medio ponderado · tarjetas de crédito como `Account` · efectivo como cuenta `cash` con ajuste mensual · precios de inversión híbridos empezando en manual · backup a CSV en Fase 1 · 1 año de histórico importado.
 
@@ -799,7 +799,7 @@ No era una fase de producto: era la que evitaba rehacer el modelo con datos real
 | Despliegue de esquema a Production | Pendiente: acción manual en el CloudKit Console. |
 | Entrada de cambios en **segundo plano** | No probada. Con un solo dispositivo no hay forma limpia de generar un cambio externo; lo verificado es que el mirroring importa datos que el dispositivo no tenía, que no es lo mismo. Se arrastra a la Fase 1. |
 
-### Fase 1 — MVP: transacciones, categorías, dashboard · SIGUIENTE
+### Fase 1 — MVP: transacciones, categorías, dashboard · CERRADA (24/08/2026)
 
 Alcance: entidades `Account`, `Transaction`, `TransactionCategory`, `FamilyTag` — **y `ImportProfile` + `ImportRule` vacías**, para que el esquema v1 ya las contenga (§3). Alta/edición/borrado manual. Lista con filtros y búsqueda. Dashboard con saldo, ingresos vs gastos y gasto por categoría. CloudKit funcionando. Categorías sembradas al primer arranque. `VersionedSchema` desde el primer commit. **Export CSV de toda la base de datos, manual**: un botón en Ajustes que exporta una carpeta con cuatro CSV, y su restauración. El volcado automático queda descartado (ver §8).
 
@@ -814,7 +814,7 @@ Alcance: entidades `Account`, `Transaction`, `TransactionCategory`, `FamilyTag` 
 - El export CSV se puede reimportar y reconstruye la base de datos completa. Una copia de seguridad que no se ha probado a restaurar no es una copia de seguridad.
 - La app arranca en frío en menos de 2 segundos con 1.000 transacciones.
 
-### Fase 2 — Facturas recurrentes y recordatorios
+### Fase 2 — Facturas recurrentes y recordatorios · CERRADA (24/08/2026)
 
 Alcance: entidad `RecurringBill`, cálculo de ocurrencias, pantalla de facturas, notificaciones locales, marcar como pagada generando la transacción, historial de importes por factura.
 
@@ -828,7 +828,7 @@ Alcance: entidad `RecurringBill`, cálculo de ocurrencias, pantalla de facturas,
 - Desactivar una factura cancela sus notificaciones pendientes.
 - Con 20 facturas activas dadas de alta, `pendingNotificationRequests` nunca supera 64 (ver riesgo de cupo en §8).
 
-### Fase 3 — Importación de CSV
+### Fase 3 — Importación de CSV · SIGUIENTE
 
 Alcance: `CSVImportService` completo, detección de formato, pantalla de mapeo con perfiles guardados, deduplicación de dos niveles, previsualización editable, autocategorización por reglas, deshacer importación por lote.
 
@@ -927,11 +927,13 @@ Solo una, y no bloquea nada hasta la Fase 4:
 
 ## 9. Por dónde empezar
 
-La Fase 0 ya está hecha. El siguiente paso es la Fase 1:
+Fases 0, 1 y 2 cerradas. El siguiente paso es la Fase 3:
 
-1. Crear el target real `ILoveFinances` en `project.yml`, con el contenedor `iCloud.dev.threedots.ilovefinances`. Lo registra Xcode solo al construir con `-allowProvisioningUpdates`: no hace falta tocar el portal de desarrollador.
-2. Escribir los modelos de §3 completos —incluidas `ImportProfile` e `ImportRule`, aunque no se usen hasta la Fase 3— con `VersionedSchema` v1, y congelar el esquema antes de meter un solo dato real.
-3. Los tests de aritmética y del invariante de CloudKit (§7 bis), antes que las pantallas.
-4. `BackupService` y el export CSV. Es lo que permite equivocarse sin consecuencias durante el resto del desarrollo.
-5. Alta rápida de transacción, que es la pantalla más usada de la app, y la lista.
-6. Borrar el target `Spike` una vez desplegado a Production el esquema del contenedor desechable.
+1. Revisar `ImportProfile` e `ImportRule` contra un CSV real del banco **antes** de escribir código: si falta un campo, se añade ahora con bump de `VersionedSchema`, no después de importar datos reales. El esquema de CloudKit en Production es aditivo y no se renombra.
+2. `CSVImportService`: parseo y detección de formato, con tests sobre ficheros reales (coma decimal, punto de millar, fechas del banco), verificando contra la columna de saldo del propio CSV.
+3. Deduplicación de dos niveles y deshacer por lote, antes de las pantallas. Es la parte que protege la base de datos.
+4. Pantalla de mapeo de columnas con guardado de perfil, y previsualización editable.
+5. Autocategorización por `ImportRule`, medida contra un extracto mensual típico (objetivo ≥70%).
+6. Borrar el target `Spike` si sigue vivo, una vez desplegado a Production el esquema del contenedor desechable.
+
+**Deuda arrastrada, aún abierta:** la entrada de cambios de CloudKit en **segundo plano** sigue sin probarse (viene de la Fase 0, §8).
