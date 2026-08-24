@@ -79,12 +79,12 @@ struct SchemaInvariantTests {
         #expect(infractores.isEmpty, "Auto-referencial: \(infractores.joined(separator: ", "))")
     }
 
-    @Test("El esquema v1 contiene las seis entidades, importacion incluida")
-    func seisEntidades() {
+    @Test("El esquema v1 contiene las siete entidades, importacion y facturas incluidas")
+    func sieteEntidades() {
         let nombres = Set(schema.entities.map(\.name))
         #expect(nombres == [
             "Account", "Transaction", "TransactionCategory",
-            "FamilyTag", "ImportProfile", "ImportRule",
+            "FamilyTag", "ImportProfile", "ImportRule", "RecurringBill",
         ])
     }
 }

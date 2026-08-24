@@ -13,6 +13,8 @@ struct SampleDataView: View {
     @Query private var categories: [TransactionCategory]
 
     @State private var count = 1_000
+    @State private var billCount = 20
+    @State private var pendingNotifications: Int?
     @State private var message: String?
 
     var body: some View {
@@ -28,9 +30,60 @@ struct SampleDataView: View {
                     Text("Reparte los movimientos entre las cuentas y categorías existentes, con fechas del último año.")
                 }
             }
+            Section {
+                Stepper("\(billCount) facturas", value: $billCount, in: 1...40)
+                Button("Generar facturas") { generateBills() }
+                    .disabled(accounts.isEmpty || categories.isEmpty)
+                LabeledContent("Avisos pendientes") {
+                    Text(pendingNotifications.map(String.init) ?? "—")
+                        .monospacedDigit()
+                        .foregroundStyle((pendingNotifications ?? 0) > 64 ? .red : .secondary)
+                }
+                .task(id: message) {
+                    pendingNotifications = await NotificationService.shared.pendingCount()
+                }
+            } footer: {
+                Text("Sirve para comprobar el cupo de notificaciones: con 20 facturas activas, los avisos pendientes nunca deben pasar de 64.")
+            }
+
             if let message { Section { Text(message) } }
         }
         .navigationTitle("Datos de prueba")
+    }
+
+    /// Facturas variadas —semanales, mensuales, trimestrales— para poder
+    /// verificar en el dispositivo el tope de 64 avisos pendientes
+    /// (PLAN.md seccion 8). Las semanales son las que mas cupo consumen.
+    private func generateBills() {
+        let gastos = categories.filter { $0.kind == .expense }
+        guard !gastos.isEmpty, !accounts.isEmpty else { return }
+
+        let periodicidades: [Recurrence] = [.weekly, .biweekly, .monthly, .quarterly]
+        let inicio = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
+
+        for index in 0..<billCount {
+            context.insert(
+                RecurringBill(
+                    name: "Factura de prueba \(index + 1)",
+                    estimatedAmount: Decimal(Int.random(in: 1_000...20_000)) / 100,
+                    isVariableAmount: index % 3 == 0,
+                    recurrence: periodicidades[index % periodicidades.count],
+                    dayOfMonth: Int.random(in: 1...28),
+                    startDate: inicio,
+                    reminderDaysBefore: Int.random(in: 0...5),
+                    account: accounts.randomElement(),
+                    category: gastos.randomElement()
+                )
+            )
+        }
+
+        do {
+            try context.save()
+            NotificationService.shared.reschedule(context: context)
+            message = "Generadas \(billCount) facturas."
+        } catch {
+            message = "Fallo: \(error)"
+        }
     }
 
     private func generate() {

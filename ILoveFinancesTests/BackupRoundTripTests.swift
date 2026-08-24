@@ -51,6 +51,33 @@ struct BackupRoundTripTests {
             amount: Decimal(string: "200.00")!, kind: .transfer,
             note: "Al ahorro", account: corriente, counterpartAccount: ahorro
         ))
+
+        // Factura recurrente con un pago enlazado (Fase 2). El pago es lo que
+        // prueba que la relacion transaccion→factura sobrevive al viaje.
+        let ocurrencia = Calendar.current.startOfDay(for: Date())
+        let factura = RecurringBill(
+            name: "Luz, Endesa",
+            estimatedAmount: Decimal(string: "61.20")!,
+            isVariableAmount: true,
+            recurrence: .monthly,
+            dayOfMonth: 5,
+            startDate: ocurrencia,
+            reminderDaysBefore: 3,
+            account: corriente,
+            category: luz,
+            familyTag: raul
+        )
+        context.insert(factura)
+
+        let pago = Transaction(
+            date: ocurrencia, amount: Decimal(string: "73.45")!, kind: .expense,
+            note: "Luz de enero", account: corriente, category: luz
+        )
+        pago.recurringBill = factura
+        pago.occurrenceDate = ocurrencia
+        pago.isRecurringInstance = true
+        context.insert(pago)
+
         try context.save()
         return (corriente, ahorro)
     }
@@ -68,7 +95,8 @@ struct BackupRoundTripTests {
         #expect(resumen.accounts == 2)
         #expect(resumen.categories == 2)
         #expect(resumen.familyTags == 1)
-        #expect(resumen.transactions == 3)
+        #expect(resumen.transactions == 4)
+        #expect(resumen.recurringBills == 1)
 
         let cuentas = try destino.fetch(FetchDescriptor<Account>()).sorted { $0.name < $1.name }
         #expect(cuentas.map(\.name) == ["Ahorro", "Corriente, BBVA"])
@@ -78,8 +106,8 @@ struct BackupRoundTripTests {
         // las dos.
         let corriente = cuentas.first { $0.name == "Corriente, BBVA" }!
         let ahorro = cuentas.first { $0.name == "Ahorro" }!
-        // 1000,00 − 0,615 + 1234567,89 − 200,00 (el traspaso sale de aqui)
-        #expect(corriente.balance == Decimal(string: "1235367.275")!)
+        // 1000,00 − 0,615 + 1234567,89 − 200,00 − 73,45 (el traspaso sale de aqui)
+        #expect(corriente.balance == Decimal(string: "1235293.825")!)
         #expect(ahorro.balance == Decimal(string: "700.00")!)
     }
 
@@ -97,6 +125,7 @@ struct BackupRoundTripTests {
             .sorted { $0 < $1 }
         #expect(importes == [
             Decimal(string: "0.615")!,
+            Decimal(string: "73.45")!,
             Decimal(string: "200.00")!,
             Decimal(string: "1234567.89")!,
         ])
@@ -131,6 +160,59 @@ struct BackupRoundTripTests {
         let luz = categorias.first { $0.name.hasPrefix("Luz") }!
         #expect(luz.parentID == vivienda.id)
         #expect(vivienda.parentID == nil)
+    }
+
+    @Test("Las facturas y sus pagos vuelven enteros y enlazados")
+    func facturasIdaYVuelta() throws {
+        let origen = try makeContext()
+        try poblar(origen)
+        let ficheros = try BackupService.export(context: origen)
+
+        let destino = try makeContext()
+        try BackupService.restoreReplacingAll(files: ficheros, context: destino)
+
+        let facturas = try destino.fetch(FetchDescriptor<RecurringBill>())
+        #expect(facturas.count == 1)
+        let factura = facturas[0]
+        #expect(factura.name == "Luz, Endesa")
+        #expect(factura.estimatedAmount == Decimal(string: "61.20")!)
+        #expect(factura.isVariableAmount)
+        #expect(factura.recurrence == .monthly)
+        #expect(factura.dayOfMonth == 5)
+        #expect(factura.reminderDaysBefore == 3)
+        #expect(factura.account?.name == "Corriente, BBVA")
+        #expect(factura.category?.name.hasPrefix("Luz") == true)
+        #expect(factura.familyTag?.name == "Raul")
+
+        // El enlace del pago es lo que da sentido al historial: sin el, la
+        // factura restaurada no sabria lo que se ha pagado.
+        #expect(factura.payments?.count == 1)
+        let pago = factura.payments?.first
+        #expect(pago?.amount == Decimal(string: "73.45")!)
+        #expect(pago?.isRecurringInstance == true)
+        #expect(pago?.occurrenceDate != nil)
+        #expect(RecurringBillService.isPaid(pago!.occurrenceDate!, of: factura))
+    }
+
+    /// Actualizar la app no puede invalidar las copias hechas antes de
+    /// actualizarla: una carpeta de la Fase 1 no trae `recurring_bills.csv` y
+    /// eso significa "ninguna factura", no "fichero corrupto".
+    @Test("Una copia de la Fase 1, sin facturas, sigue restaurando")
+    func copiaAntiguaSinFacturas() throws {
+        let origen = try makeContext()
+        try poblar(origen)
+
+        var ficheros = try BackupService.export(context: origen)
+        ficheros.removeValue(forKey: BackupService.FileName.recurringBills)
+
+        let destino = try makeContext()
+        let resumen = try BackupService.restoreReplacingAll(files: ficheros, context: destino)
+
+        #expect(resumen.recurringBills == 0)
+        #expect(resumen.transactions == 4)
+        #expect(try destino.fetchCount(FetchDescriptor<RecurringBill>()) == 0)
+        // Las transacciones se restauran igual, solo que sin factura detras.
+        #expect(try destino.fetch(FetchDescriptor<Transaction>()).allSatisfy { $0.recurringBill == nil })
     }
 
     /// Si el fichero esta corrupto, la base de datos se queda como estaba en

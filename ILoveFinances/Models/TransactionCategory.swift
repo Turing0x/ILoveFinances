@@ -37,6 +37,10 @@ final class TransactionCategory {
     @Relationship(deleteRule: .nullify, inverse: \ImportRule.category)
     var importRules: [ImportRule]? = []
 
+    /// Inversa de `RecurringBill.category` (Fase 2).
+    @Relationship(deleteRule: .nullify, inverse: \RecurringBill.category)
+    var recurringBills: [RecurringBill]? = []
+
     init(
         id: UUID = UUID(),
         name: String = "",

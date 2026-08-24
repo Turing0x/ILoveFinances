@@ -8,7 +8,7 @@ import SwiftData
 /// pero NO respalda: un borrado se propaga a la nube y a cualquier dispositivo
 /// futuro.
 ///
-/// Formato: una carpeta con cuatro CSV, uno por entidad, con las relaciones
+/// Formato: una carpeta con un CSV por entidad, con las relaciones
 /// expresadas por UUID. Carpeta y no fichero unico porque un CSV con secciones
 /// separadas por marcas deja de abrirse en Numbers, y eso se pierde a cambio de
 /// nada.
@@ -19,6 +19,7 @@ enum BackupService {
         static let categories = "categories.csv"
         static let familyTags = "family_tags.csv"
         static let transactions = "transactions.csv"
+        static let recurringBills = "recurring_bills.csv"
         static let manifest = "manifest.csv"
     }
 
@@ -46,15 +47,17 @@ enum BackupService {
         let categories = try context.fetch(FetchDescriptor<TransactionCategory>())
         let familyTags = try context.fetch(FetchDescriptor<FamilyTag>())
         let transactions = try context.fetch(FetchDescriptor<Transaction>())
+        let recurringBills = try context.fetch(FetchDescriptor<RecurringBill>())
 
         return [
             FileName.manifest: CSVCodec.encode(
-                header: ["schemaVersion", "exportedAt", "accounts", "categories", "familyTags", "transactions"],
+                header: ["schemaVersion", "exportedAt", "accounts", "categories", "familyTags", "transactions", "recurringBills"],
                 rows: [[
                     "\(SchemaV1.versionIdentifier)",
                     CSVCodec.string(from: Date()),
                     "\(accounts.count)", "\(categories.count)",
                     "\(familyTags.count)", "\(transactions.count)",
+                    "\(recurringBills.count)",
                 ]]
             ),
             FileName.accounts: CSVCodec.encode(
@@ -95,7 +98,8 @@ enum BackupService {
                 header: [
                     "id", "date", "amount", "kind", "note", "merchant",
                     "accountID", "counterpartAccountID", "categoryID", "familyTagID",
-                    "isRecurringInstance", "importHash", "importBatchID", "createdAt",
+                    "isRecurringInstance", "recurringBillID", "occurrenceDate",
+                    "importHash", "importBatchID", "createdAt",
                 ],
                 rows: transactions.map { transaction in
                     [
@@ -110,9 +114,35 @@ enum BackupService {
                         CSVCodec.string(from: transaction.category?.id),
                         CSVCodec.string(from: transaction.familyTag?.id),
                         CSVCodec.string(from: transaction.isRecurringInstance),
+                        CSVCodec.string(from: transaction.recurringBill?.id),
+                        transaction.occurrenceDate.map(CSVCodec.string(from:)) ?? "",
                         transaction.importHash ?? "",
                         CSVCodec.string(from: transaction.importBatchID),
                         CSVCodec.string(from: transaction.createdAt),
+                    ]
+                }
+            ),
+            FileName.recurringBills: CSVCodec.encode(
+                header: [
+                    "id", "name", "estimatedAmount", "isVariableAmount", "recurrence",
+                    "dayOfMonth", "startDate", "endDate", "isActive", "reminderDaysBefore",
+                    "accountID", "categoryID", "familyTagID", "createdAt",
+                ],
+                rows: recurringBills.map { bill in
+                    [
+                        bill.id.uuidString, bill.name,
+                        CSVCodec.string(from: bill.estimatedAmount),
+                        CSVCodec.string(from: bill.isVariableAmount),
+                        bill.recurrenceRaw,
+                        "\(bill.dayOfMonth)",
+                        CSVCodec.string(from: bill.startDate),
+                        bill.endDate.map(CSVCodec.string(from:)) ?? "",
+                        CSVCodec.string(from: bill.isActive),
+                        "\(bill.reminderDaysBefore)",
+                        CSVCodec.string(from: bill.account?.id),
+                        CSVCodec.string(from: bill.category?.id),
+                        CSVCodec.string(from: bill.familyTag?.id),
+                        CSVCodec.string(from: bill.createdAt),
                     ]
                 }
             ),
@@ -126,6 +156,7 @@ enum BackupService {
         var categories = 0
         var familyTags = 0
         var transactions = 0
+        var recurringBills = 0
     }
 
     /// **Reemplaza todo.** Borra lo que haya y reconstruye desde el CSV.
@@ -142,9 +173,14 @@ enum BackupService {
         let categoryRows = try table(FileName.categories, in: files).rows
         let familyTagRows = try table(FileName.familyTags, in: files).rows
         let transactionRows = try table(FileName.transactions, in: files).rows
+        // Una copia de la Fase 1 no trae facturas: ausente significa "ninguna",
+        // no fichero corrupto. Si esto fuese `missingFile`, actualizar la app
+        // invalidaria las copias hechas antes de actualizarla.
+        let billRows = (try? table(FileName.recurringBills, in: files).rows) ?? []
 
         // Punto de no retorno.
         try context.delete(model: Transaction.self)
+        try context.delete(model: RecurringBill.self)
         try context.delete(model: Account.self)
         try context.delete(model: TransactionCategory.self)
         try context.delete(model: FamilyTag.self)
@@ -204,6 +240,36 @@ enum BackupService {
             tagsByID[id] = tag
         }
 
+        // Las facturas van ANTES que las transacciones: cada pago se engancha a
+        // la suya por UUID y para eso tiene que existir ya.
+        var billsByID: [UUID: RecurringBill] = [:]
+        for row in billRows {
+            guard let id = CSVCodec.uuid(from: row["id"] ?? "") else {
+                throw BackupError.malformedRow(file: FileName.recurringBills, detail: "id vacio o invalido")
+            }
+            guard let estimated = CSVCodec.decimal(from: row["estimatedAmount"] ?? "") else {
+                throw BackupError.malformedRow(file: FileName.recurringBills, detail: "importe ilegible en \(id)")
+            }
+            let bill = RecurringBill(
+                name: row["name"] ?? "",
+                estimatedAmount: estimated,
+                isVariableAmount: CSVCodec.bool(from: row["isVariableAmount"] ?? ""),
+                recurrence: Recurrence(rawValue: row["recurrence"] ?? "") ?? .monthly,
+                dayOfMonth: Int(row["dayOfMonth"] ?? "") ?? 1,
+                startDate: CSVCodec.date(from: row["startDate"] ?? "") ?? Date(),
+                endDate: CSVCodec.date(from: row["endDate"] ?? ""),
+                isActive: CSVCodec.bool(from: row["isActive"] ?? ""),
+                reminderDaysBefore: Int(row["reminderDaysBefore"] ?? "") ?? 3,
+                account: CSVCodec.uuid(from: row["accountID"] ?? "").flatMap { accountsByID[$0] },
+                category: CSVCodec.uuid(from: row["categoryID"] ?? "").flatMap { categoriesByID[$0] },
+                familyTag: CSVCodec.uuid(from: row["familyTagID"] ?? "").flatMap { tagsByID[$0] }
+            )
+            bill.id = id
+            if let created = CSVCodec.date(from: row["createdAt"] ?? "") { bill.createdAt = created }
+            context.insert(bill)
+            billsByID[id] = bill
+        }
+
         for row in transactionRows {
             guard let id = CSVCodec.uuid(from: row["id"] ?? "") else {
                 throw BackupError.malformedRow(file: FileName.transactions, detail: "id vacio o invalido")
@@ -224,6 +290,8 @@ enum BackupService {
             )
             transaction.id = id
             transaction.isRecurringInstance = CSVCodec.bool(from: row["isRecurringInstance"] ?? "")
+            transaction.recurringBill = CSVCodec.uuid(from: row["recurringBillID"] ?? "").flatMap { billsByID[$0] }
+            transaction.occurrenceDate = CSVCodec.date(from: row["occurrenceDate"] ?? "")
             transaction.importHash = emptyToNil(row["importHash"])
             transaction.importBatchID = CSVCodec.uuid(from: row["importBatchID"] ?? "")
             if let created = CSVCodec.date(from: row["createdAt"] ?? "") { transaction.createdAt = created }
@@ -236,7 +304,8 @@ enum BackupService {
             accounts: accountRows.count,
             categories: categoryRows.count,
             familyTags: familyTagRows.count,
-            transactions: transactionRows.count
+            transactions: transactionRows.count,
+            recurringBills: billRows.count
         )
     }
 

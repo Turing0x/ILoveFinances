@@ -22,6 +22,10 @@ final class FamilyTag {
     @Relationship(deleteRule: .nullify, inverse: \ImportRule.familyTag)
     var importRules: [ImportRule]? = []
 
+    /// Inversa de `RecurringBill.familyTag` (Fase 2).
+    @Relationship(deleteRule: .nullify, inverse: \RecurringBill.familyTag)
+    var recurringBills: [RecurringBill]? = []
+
     init(name: String = "", colorHex: String = "#4A90D9", sortOrder: Int = 0) {
         self.id = UUID()
         self.name = name

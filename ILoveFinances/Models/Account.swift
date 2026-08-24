@@ -27,6 +27,11 @@ final class Account {
     @Relationship(deleteRule: .nullify, inverse: \ImportProfile.account)
     var importProfiles: [ImportProfile]? = []
 
+    /// Inversa de `RecurringBill.account` (Fase 2). Misma regla: sin inversa
+    /// declarada CloudKit rechaza el store entero, en ejecucion y sin aviso.
+    @Relationship(deleteRule: .nullify, inverse: \RecurringBill.account)
+    var recurringBills: [RecurringBill]? = []
+
     init(
         name: String = "",
         type: AccountType = .checking,

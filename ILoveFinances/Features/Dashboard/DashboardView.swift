@@ -10,6 +10,7 @@ struct DashboardView: View {
 
     @Query(sort: \Account.name) private var accounts: [Account]
     @Query private var allTransactions: [Transaction]
+    @Query(sort: \RecurringBill.name) private var bills: [RecurringBill]
 
     var body: some View {
         NavigationStack {
@@ -18,6 +19,7 @@ struct DashboardView: View {
                 periodSection
                 balanceSection
                 flowSection
+                if !upcomingBills.isEmpty { upcomingBillsSection }
                 if !breakdown.isEmpty { categorySection }
                 if usedFamilyTags.count > 1 { familySection }
             }
@@ -79,6 +81,17 @@ struct DashboardView: View {
             )
         }
         .sorted { $0.amount > $1.amount }
+    }
+
+    /// Proximas facturas a 30 dias. La ventana es mas corta que la de la
+    /// pestana de Facturas (60) a proposito: el resumen es un vistazo, no el
+    /// listado completo.
+    private var upcomingBills: [RecurringBillService.Upcoming] {
+        RecurringBillService.upcoming(
+            bills: bills.filter(\.isActive),
+            days: 30,
+            includingPaid: false
+        )
     }
 
     private var usedFamilyTags: [(name: String, amount: Decimal)] {
@@ -202,6 +215,18 @@ struct DashboardView: View {
                     Label(slice.name, systemImage: "circle.fill")
                         .foregroundStyle(Color(hex: slice.colorHex))
                 }
+            }
+        }
+    }
+
+    private var upcomingBillsSection: some View {
+        Section("Próximas facturas") {
+            ForEach(upcomingBills) { item in
+                UpcomingRow(item: item)
+            }
+            LabeledContent("Total estimado a 30 días") {
+                Text(Money.formatted(upcomingBills.reduce(Decimal.zero) { $0 + $1.bill.estimatedAmount }))
+                    .monospacedDigit()
             }
         }
     }

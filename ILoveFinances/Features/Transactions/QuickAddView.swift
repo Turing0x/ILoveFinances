@@ -7,7 +7,21 @@ import SwiftUI
 /// De ahi las decisiones de aqui: importe primero y con el teclado ya enfocado,
 /// las 6 categorias mas usadas recientemente a un toque, y fecha por defecto
 /// hoy. Guardar y cerrar en tres toques.
+/// Datos con los que se abre el alta al marcar una factura como pagada.
+///
+/// La factura no se paga sola: se abre esta misma pantalla con todo relleno y
+/// el importe enfocado, porque en las variables —la luz— el importe real casi
+/// nunca es el estimado, y confirmarlo es el momento en que se corrige.
+struct BillPrefill {
+    let bill: RecurringBill
+    let occurrenceDate: Date
+}
+
 struct QuickAddView: View {
+    /// `nil` en el alta normal, que se comporta exactamente igual que antes:
+    /// esta pantalla no puede perder sus tres toques.
+    var prefill: BillPrefill?
+
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
@@ -86,7 +100,7 @@ struct QuickAddView: View {
                     }
                 }
             }
-            .navigationTitle("Nuevo movimiento")
+            .navigationTitle(prefill == nil ? "Nuevo movimiento" : "Pagar factura")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -96,11 +110,26 @@ struct QuickAddView: View {
                     Button("Guardar", action: save).disabled(!canSave)
                 }
             }
-            .onAppear {
-                amountFocused = true
-                if selectedAccount == nil { selectedAccount = activeAccounts.first }
-            }
+            .onAppear(perform: load)
         }
+    }
+
+    /// Con factura, el formulario llega relleno y el foco sigue en el importe:
+    /// lo unico que suele cambiar.
+    private func load() {
+        amountFocused = true
+        guard let prefill else {
+            if selectedAccount == nil { selectedAccount = activeAccounts.first }
+            return
+        }
+        let bill = prefill.bill
+        kind = .expense
+        amountText = Money.csvString(bill.estimatedAmount)
+        date = prefill.occurrenceDate
+        note = bill.name
+        selectedAccount = bill.account ?? activeAccounts.first
+        selectedCategory = bill.category
+        selectedFamilyTag = bill.familyTag
     }
 
     // MARK: - Atajos de categoria
@@ -181,8 +210,16 @@ struct QuickAddView: View {
             category: kind == .transfer ? nil : selectedCategory,
             familyTag: selectedFamilyTag
         )
+        if let prefill {
+            transaction.recurringBill = prefill.bill
+            transaction.occurrenceDate = prefill.occurrenceDate
+            transaction.isRecurringInstance = true
+        }
         context.insert(transaction)
         try? context.save()
+
+        // La ocurrencia pagada deja de necesitar aviso.
+        if prefill != nil { NotificationService.shared.reschedule(context: context) }
         dismiss()
     }
 }

@@ -26,6 +26,15 @@ final class Transaction {
     // Marcadores
     var isRecurringInstance: Bool = false     // generada por una RecurringBill (Fase 2)
 
+    /// Ocurrencia concreta que paga esta transaccion, a las 00:00 del dia
+    /// previsto de cargo — NO el dia en que se pago.
+    ///
+    /// Es lo que permite saber si la factura de febrero esta pagada aunque se
+    /// pagase el 12 de marzo. La alternativa que contemplaba el plan (buscar un
+    /// pago dentro de una ventana alrededor de la ocurrencia) falla justo en
+    /// ese caso y en el de dos pagos juntos.
+    var occurrenceDate: Date?
+
     /// Foto de ticket. El campo entra en el esquema v1 aunque la UI llegue
     /// despues: anadir un campo a CloudKit es seguro, cambiarlo de tipo no.
     @Attribute(.externalStorage) var receiptData: Data?
@@ -34,6 +43,8 @@ final class Transaction {
     var counterpartAccount: Account?          // solo para kind == .transfer
     var category: TransactionCategory?
     var familyTag: FamilyTag?
+    /// Inversa de `RecurringBill.payments`.
+    var recurringBill: RecurringBill?
 
     init(
         date: Date = Date(),
