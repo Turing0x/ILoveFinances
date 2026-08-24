@@ -2,7 +2,7 @@
 
 App **iPhone** de finanzas familiares para uso personal de Raúl. SwiftUI + SwiftData, **iOS 26+**, euro como única divisa, sin backend propio.
 
-Estado del documento: **Fases 0, 1, 2 y 5 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). **Esquema de diez entidades desplegado a CloudKit Production el 24/08/2026**: desde esa fecha, todo cambio de modelo exige `SchemaV2` + `MigrationStage`. La Fase 3 puede empezar.
+Estado del documento: **Fases 0, 1, 2 y 5 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). **Esquema desplegado a CloudKit Production el 24/08/2026**: desde esa fecha, todo cambio de modelo exige `SchemaV2` + `MigrationStage`. En Production hay **7 de los 10** `RecordType`; los tres que faltan se despliegan cuando se usen (ver §8). La Fase 3 puede empezar.
 
 > La **Fase 5** (tickets de compra y comparador de precios) no estaba planificada y se adelanto a las Fases 3 y 4: necesitaba entrar en el esquema v1 **antes** del despliegue a Production, que es la ultima ventana en que se pueden anadir entidades en sitio. Ver la seccion de fases.
 
@@ -929,6 +929,7 @@ Las pantallas se prueban a mano contra los criterios de "hecho cuando" de cada f
 | ~~**`Decimal` puede perder precisión al viajar por CloudKit.**~~ | ~~Alto~~ | **RESUELTO en la Fase 0.** Se almacena como `Double`, pero vuelve con igualdad exacta en los 10 valores patológicos y en la suma del lote. Ver `docs/fase0-resultados.md`. |
 | **Esquema de CloudKit en Production es aditivo.** No se pueden borrar campos ni cambiarles el tipo una vez desplegados. | Alto | Meter en el esquema v1 todas las entidades previstas, aunque estén vacías (`ImportProfile`, `ImportRule`). Congelar antes de introducir datos reales. |
 | **Fontanería de CloudKit incompleta.** Falta un entitlement o Background Modes y la sincronización no ocurre, o funciona en debug y no en release. | Medio | Tres de los cuatro puntos de §2 verificados en la Fase 0 sobre el binario firmado. Queda el despliegue de esquema a Production, que hay que repetir con **cada** cambio de modelo. |
+| **Tres `RecordType` sin desplegar a Production.** SwiftData crea el tipo al sincronizar el PRIMER registro de la entidad, no al arrancar. `CD_FamilyTag`, `CD_ImportProfile` y `CD_ImportRule` no existen aún en Production porque sus tablas siempre han estado vacías. Escribir en una entidad cuyo tipo falta en Production hace que CloudKit rechace la escritura y SwiftData reintente **en silencio**: el dato se queda en el móvil y todo parece ir bien. | Medio | Aceptado a conciencia, sin código: **desplegar de nuevo en cuanto cada una estrene su primera fila** — `FamilyTag` al crear el primer miembro, las dos de importación al empezar la Fase 3. Añadir un `RecordType` es aditivo y no exige migración. Se descartó forzarlos con un botón de depuración; la contrapartida asumida es que esto depende de acordarse. |
 | **Cupo de 64 notificaciones locales pendientes** por app en iOS. Con varias facturas recurrentes se agota y las últimas se pierden en silencio. | Medio | `RecurringBillService` programa una ventana deslizante (siguientes 60 días), no todo el futuro, y reprograma al abrir la app. Criterio de cierre de la Fase 2. |
 | **Aritmética con `Decimal`.** Es fácil colar un `Double` por descuido en un cálculo intermedio. | Alto (corrección silenciosa) | Prohibir `Double` en cualquier tipo relacionado con dinero. Tests de suma sobre 1.000 importes de céntimos comparando con el valor exacto esperado (§7 bis). |
 | **Coste medio con decimales periódicos.** `costeTotal / cantidad` puede no ser exacto (p. ej. 100 € / 3 participaciones). | Medio | Mantener el coste medio a 6 decimales y **derivar siempre el coste total del acumulado**, nunca de `costeMedio × cantidad`. Redondear solo al mostrar. |
@@ -962,6 +963,7 @@ Solo una, y no bloquea nada hasta la Fase 4:
 
 Fases 0, 1, 2 y 5 cerradas. El siguiente paso es la Fase 3:
 
+0. **Desplegar el esquema a Production otra vez en cuanto se guarde el primer `ImportProfile` o `ImportRule`.** Sus `RecordType` todavía no existen allí (§8); hasta que se desplieguen, el sync de esas dos entidades falla sin decir nada.
 1. Revisar `ImportProfile` e `ImportRule` contra un CSV real del banco antes de escribir código. **Ya no hay ventana barata**: el esquema está desplegado a Production, así que cualquier campo que falte entra con `SchemaV2` + `MigrationStage` y copia de seguridad previa. Añadir campos sigue siendo legal; borrarlos o cambiarles el tipo, no.
 2. `CSVImportService`: parseo y detección de formato, con tests sobre ficheros reales (coma decimal, punto de millar, fechas del banco), verificando contra la columna de saldo del propio CSV.
 3. Deduplicación de dos niveles y deshacer por lote, antes de las pantallas. Es la parte que protege la base de datos.
