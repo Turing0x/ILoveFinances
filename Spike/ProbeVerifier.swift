@@ -8,13 +8,31 @@ import SwiftData
 /// que se esta buscando.
 enum ProbeVerifier {
 
+    /// Tri-estado a proposito. Marcar como FALLO algo que la escala nunca
+    /// pudo representar convierte el informe en ruido.
+    enum Outcome {
+        case ok
+        case fail
+        case outOfScale
+
+        var text: String {
+            switch self {
+            case .ok:         return "OK"
+            case .fail:       return "FALLO"
+            case .outOfScale: return "n/a"
+            }
+        }
+
+        var isProblem: Bool { self == .fail }
+    }
+
     struct Row {
         let label: String
         let expected: Decimal
-        let decimalOK: Bool
-        let scaledIntOK: Bool
-        let stringOK: Bool
-        let doubleOK: Bool
+        let decimal: Outcome
+        let scaledInt: Outcome
+        let string: Outcome
+        let double: Outcome
         let decimalGot: Decimal
         let doubleGot: Decimal
     }
@@ -29,6 +47,8 @@ enum ProbeVerifier {
         let batchFromDouble: Decimal
     }
 
+    private static func outcome(_ passed: Bool) -> Outcome { passed ? .ok : .fail }
+
     static func verify(context: ModelContext) throws -> Result {
         let probes = try context.fetch(FetchDescriptor<MoneyProbe>())
         let byLabel = Dictionary(grouping: probes.filter { !$0.isBatchItem }, by: \.label)
@@ -41,14 +61,18 @@ enum ProbeVerifier {
                 missing.append(expectation.label)
                 continue
             }
+            let scaled: Outcome = expectation.isRepresentableAtScale
+                ? outcome(probe.decodedFromScaledInt == expectation.value)
+                : .outOfScale
+
             rows.append(
                 Row(
                     label: expectation.label,
                     expected: expectation.value,
-                    decimalOK: probe.asDecimal == expectation.value,
-                    scaledIntOK: probe.decodedFromScaledInt == expectation.value,
-                    stringOK: probe.decodedFromString == expectation.value,
-                    doubleOK: probe.decodedFromDouble == expectation.value,
+                    decimal: outcome(probe.asDecimal == expectation.value),
+                    scaledInt: scaled,
+                    string: outcome(probe.decodedFromString == expectation.value),
+                    double: outcome(probe.decodedFromDouble == expectation.value),
                     decimalGot: probe.asDecimal,
                     doubleGot: probe.decodedFromDouble
                 )
@@ -87,16 +111,24 @@ enum ProbeVerifier {
             lines.append(
                 "  " + row.label.p(10)
                 + Self.text(row.expected).p(16)
-                + Self.mark(row.decimalOK).p(9)
-                + Self.mark(row.scaledIntOK).p(10)
-                + Self.mark(row.stringOK).p(9)
-                + Self.mark(row.doubleOK)
+                + row.decimal.text.p(9)
+                + row.scaledInt.text.p(10)
+                + row.string.text.p(9)
+                + row.double.text
             )
         }
 
         // Solo se detallan las filas que fallan: ver el valor real es lo que
         // convierte un "FALLO" en evidencia utilizable en el informe.
-        let broken = result.rows.filter { !$0.decimalOK }
+        if result.rows.contains(where: { $0.scaledInt == .outOfScale }) {
+            let labels = result.rows.filter { $0.scaledInt == .outOfScale }.map(\.label)
+            lines.append("")
+            lines.append("  n/a en Escalado: \(labels.joined(separator: ", ")) tienen 3 decimales")
+            lines.append("     y la escala de centimos (10^2) solo guarda 2. Limite de la")
+            lines.append("     escala, no perdida por el viaje.")
+        }
+
+        let broken = result.rows.filter { $0.decimal.isProblem }
         if !broken.isEmpty {
             lines.append("")
             lines.append("DETALLE DE LOS FALLOS DE Decimal")
@@ -128,14 +160,24 @@ enum ProbeVerifier {
             return "SIN VEREDICTO: faltan registros por importar. Espera y reintenta."
         }
 
-        let decimalClean = result.rows.allSatisfy(\.decimalOK)
+        let decimalClean = result.rows.allSatisfy { !$0.decimal.isProblem }
             && result.batchFromDecimal == result.batchExpected
-        let scaledClean = result.rows.allSatisfy(\.scaledIntOK)
+        let scaledClean = result.rows.allSatisfy { !$0.scaledInt.isProblem }
             && result.batchFromScaledInt == result.batchExpected
+
+        guard controlIsMeaningful(result) else {
+            return """
+            SIN VEREDICTO: el control Double tampoco falla en ninguna fila.
+            Si ni siquiera Double pierde, el test no esta midiendo la conversion
+            y un "todo OK" no significaria nada. Revisar antes de concluir.
+            """
+        }
 
         if decimalClean {
             return """
             VEREDICTO: Decimal sobrevive intacto al viaje por CloudKit.
+            Se guarda como Double en el CKRecord, pero la conversion de vuelta
+            recupera el decimal original en todos los casos probados.
             Se mantiene Decimal en PLAN.md seccion 3 y se elimina el plan B.
             """
         }
@@ -160,6 +202,12 @@ enum ProbeVerifier {
     }
 
     private static func mark(_ ok: Bool) -> String { ok ? "OK" : "FALLO" }
+
+    /// El control. Si Double saliera limpio en todo, el test no estaria
+    /// midiendo nada y un "todo OK" no significaria nada.
+    static func controlIsMeaningful(_ result: Result) -> Bool {
+        result.rows.contains { $0.double.isProblem }
+    }
 }
 
 private extension String {

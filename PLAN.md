@@ -1,10 +1,21 @@
 # ILoveFinances GF — Plan de desarrollo
 
-App **iPhone** de finanzas familiares para uso personal de Raúl. SwiftUI + SwiftData, **iOS 18+**, euro como única divisa, sin backend propio.
+App **iPhone** de finanzas familiares para uso personal de Raúl. SwiftUI + SwiftData, **iOS 26+**, euro como única divisa, sin backend propio.
 
-Estado del documento: planificación revisada. No hay código todavía.
+Estado del documento: **Fase 0 cerrada** (24 de agosto de 2026, ver `docs/fase0-resultados.md`). La Fase 1 puede empezar.
 
 **Decisiones cerradas** (ver §8): solo iPhone · coste medio ponderado · tarjetas de crédito como `Account` · efectivo como cuenta `cash` con ajuste mensual · precios de inversión híbridos empezando en manual · backup a CSV en Fase 1 · 1 año de histórico importado.
+
+**Datos firmes del proyecto:**
+
+| | |
+|---|---|
+| Bundle ID | `dev.threedots.ilovefinances` |
+| Contenedor CloudKit | `iCloud.dev.threedots.ilovefinances` |
+| Team | `M2J9PP4RR8` |
+| Deployment target | iOS 26.0 |
+| Modo de lenguaje | Swift 5 (compilador 6.3) |
+| Proyecto Xcode | generado con XcodeGen desde `project.yml`; el `.xcodeproj` no va a git |
 
 ---
 
@@ -67,6 +78,14 @@ Persistence
 ```
 
 Los servicios son structs o enums con métodos estáticos/puros siempre que se pueda. Reciben lo que necesitan por parámetro y devuelven valores; no guardan `ModelContext` como propiedad. Esto los hace testeables sin levantar un contenedor.
+
+### Concurrencia: modo Swift 5, todo en el hilo principal
+
+Xcode 26 activa Swift 6 estricto por defecto en proyectos nuevos. Aquí se fija **modo de lenguaje Swift 5** explícitamente (`SWIFT_VERSION = 5.0` en `project.yml`), y la razón es concreta: ni `ModelContext` ni las clases `@Model` son `Sendable`. En modo 6 cada servicio que toque la base de datos exige `@ModelActor` y una capa de conversión a tipos `Sendable` para cruzar la frontera de aislamiento.
+
+Para una app personal, de un solo usuario, con datos locales y sin operaciones largas salvo la importación de CSV, ese coste no compra nada. La regla práctica: **todo lo que toque `ModelContext` vive en `@MainActor`.** Si la importación de un CSV grande llega a bloquear la interfaz —cosa que hay que medir, no suponer—, se aísla ese servicio concreto en un `@ModelActor` sin migrar el resto.
+
+Migrar a Swift 6 después es posible y el proyecto es pequeño. Empezar por ahí habría gastado las primeras horas peleando con el compilador en vez de con el problema.
 
 ### Organización de carpetas (Xcode)
 
@@ -143,17 +162,16 @@ Y una implicación operativa: el esquema de CloudKit en Production es **aditivo*
 
 **`Decimal` para todos los importes, nunca `Double`.** `Double` no representa 0,1 exacto; sumar 300 gastos de céntimos acumula error visible. Todas las operaciones aritméticas van con `Decimal` y `NSDecimalNumber.RoundingMode.plain` a 2 decimales al mostrar (4-6 decimales en cantidades de activos).
 
-> **Verificar antes de congelar el esquema.** SwiftData persiste `Decimal` bien en local, pero el trayecto por CloudKit pasa por `NSPersistentCloudKitContainer`, que serializa el atributo al `CKRecord`. Si esa serialización pasa por `Double`, un importe puede volver de la nube con un error de precisión mínimo — invisible en una fila, acumulable en un total anual. **Primera tarea de la Fase 1, antes que ninguna pantalla:** guardar valores problemáticos (`0.1`, `0.07`, `1234567.89`) en un dispositivo, forzar la sincronización, leerlos en otro contexto y comparar con `==` de `Decimal`, no con tolerancia.
+> **Verificado en la Fase 0 — `Decimal` se queda.** (24/08/2026, ver `docs/fase0-resultados.md`.)
 >
-> Si el test falla, el plan B es persistir **céntimos como `Int`** y exponer `Decimal` computado:
-> ```swift
-> var amountCents: Int = 0
-> var amount: Decimal {
->     get { Decimal(amountCents) / 100 }
->     set { amountCents = NSDecimalNumber(decimal: newValue * 100).intValue }
-> }
-> ```
-> Exacto por construcción, y `Int` viaja por CloudKit sin discusión. El coste es que los predicados filtran sobre `amountCents`. Decidir esto **antes** del primer dato real: cambiar el tipo de un campo ya desplegado en Production no se puede.
+> El hallazgo tiene dos mitades y las dos importan:
+>
+> - **Se almacena como `Double`.** El volcado del `CKRecord` crudo muestra `CD_asDecimal` con tipo `Double` y exactamente los mismos bits que un campo de control `Double` (`0.010000000000000000208` para 0,01). CloudKit no tiene tipo decimal y el mirroring lo degrada. La sospecha estaba fundada.
+> - **Vuelve intacto de todas formas.** Tras sembrar 210 registros, desinstalar la app y reinstalarla, los diez valores patológicos (`0.1`, `0.07`, `0.615`, `1234567.89`, `99999999.99`, `12.345678`…) y la suma de 200 filas de `0,01 €` regresan de la nube con igualdad **exacta** de `Decimal`. La conversión de vuelta recupera el decimal original para cualquier importe de magnitud realista.
+>
+> Lo que da crédito al resultado: en la misma prueba el campo de control `Double` **sí falla** en tres filas. Si el control hubiera salido limpio, un "todo OK" solo probaría que la comparación no mide nada.
+>
+> Queda descartado el plan B de persistir céntimos en `Int`. Aviso que sobrevive de aquella exploración: una escala de céntimos no puede representar fracciones de céntimo (`0,005` se pierde), así que si algún día un precio por unidad o un tipo de cambio necesita más de 2 decimales, `Decimal` sigue valiendo y el entero escalado no.
 
 **Un solo signo de importe.** El importe se guarda **siempre positivo** y el signo lo determina `kind` (`.expense` / `.income`). Alternativa descartada: guardar negativos para gastos — hace que cualquier suma o filtro requiera recordar el convenio y produce bugs silenciosos al importar CSV (cada banco usa el suyo).
 
@@ -161,11 +179,13 @@ Y una implicación operativa: el esquema de CloudKit en Production es **aditivo*
 
 **`id: UUID` explícito en cada entidad.** SwiftData usa `PersistentIdentifier` internamente, pero para deduplicación de CSV, exportación y depuración conviene un identificador estable y propio.
 
-**Índices.** El deployment target es iOS 18+ precisamente para tener `#Index` disponible desde el día uno. `Transaction` lleva `#Index<Transaction>([\.date], [\.date, \.kindRaw])`, que cubre el listado ordenado por fecha y los filtros por tipo. Con esto desaparece el riesgo de rendimiento que obligaba a medir con datasets sintéticos antes de cerrar la Fase 1.
+**Índices.** El deployment target es iOS 26 y `#Index` está disponible desde el día uno — **verificado que compila** en la Fase 0. `Transaction` lleva `#Index<Transaction>([\.date], [\.date, \.kindRaw])`, que cubre el listado ordenado por fecha y los filtros por tipo. Con esto desaparece el riesgo de rendimiento que obligaba a medir con datasets sintéticos antes de cerrar la Fase 1.
 
-Subir de iOS 17 a iOS 18 no cuesta nada aquí: los dispositivos son propios y no hay usuarios ajenos a los que dejar atrás.
+Fijar el suelo en iOS 26 no cuesta nada aquí: el dispositivo es propio, ya va en 26, y no hay usuarios ajenos a los que dejar atrás.
 
 **Predicados y propiedades calculadas.** `#Predicate` solo puede filtrar por atributos persistidos. `signedAmount`, `grossAmount` o el saldo de una cuenta son calculados y **no** se pueden usar en un `FetchDescriptor`: hay que filtrar por `kindRaw` y `amount` por separado, o traer y filtrar en memoria. Tenerlo presente al diseñar cada consulta.
+
+**`Decimal` sí funciona dentro de `#Predicate`** — verificado en la Fase 0 con un `fetch` real, no solo comprobando que compila. El filtro de rango de importe de la pantalla de Movimientos (§6) puede ir directo sobre `amount`.
 
 ### Entidades
 
@@ -750,17 +770,20 @@ Cuentas, categorías, miembros, reglas de autocategorización, importar CSV, his
 
 Cada fase se cierra cuando cumple sus criterios. No se empieza la siguiente con la anterior a medias — en un proyecto de una persona, arrastrar tres frentes abiertos es la forma habitual de no terminar ninguno.
 
-### Fase 0 — Spike de esquema (medio día, antes de cualquier pantalla)
+### Fase 0 — Spike de esquema · CERRADA (24/08/2026)
 
-No es una fase de producto: es la que evita rehacer el modelo con datos reales dentro. Proyecto vacío, entitlements de iCloud puestos, un `@Model` de prueba.
+No era una fase de producto: era la que evitaba rehacer el modelo con datos reales dentro. Resultados completos en `docs/fase0-resultados.md`.
 
-**Hecho cuando:**
+| Criterio | Resultado |
+|---|---|
+| `Decimal` sobrevive al viaje por CloudKit con `==` exacto | **Sí.** 10 valores patológicos y la suma de 200 × 0,01 €, tras desinstalar la app y reinstalarla. Se almacena como `Double` pero vuelve intacto. Plan B descartado. |
+| `#Index` compila | Sí. |
+| `Decimal` sirve en `#Predicate` | Sí, verificado con un `fetch` real y no solo compilando. |
+| Fontanería de CloudKit: entitlement, background modes, `aps-environment` | Verificada sobre el binario firmado. |
+| Despliegue de esquema a Production | Pendiente: acción manual en el CloudKit Console. |
+| Entrada de cambios en **segundo plano** | No probada. Con un solo dispositivo no hay forma limpia de generar un cambio externo; lo verificado es que el mirroring importa datos que el dispositivo no tenía, que no es lo mismo. Se arrastra a la Fase 1. |
 
-- Un `Decimal` con valores `0.1`, `0.07` y `1234567.89` sobrevive al viaje por CloudKit y vuelve **exactamente igual** comparado con `==`. Si no, se adopta el plan B de céntimos en `Int` (§3) y se anota en el modelo antes de escribir nada más.
-- La app en un dispositivo recibe un cambio hecho desde otro contexto sin abrirla en primer plano (confirma que Background Modes → Remote notifications está bien puesto).
-- El esquema aparece en el CloudKit Console y se despliega a Production sin errores.
-
-### Fase 1 — MVP: transacciones, categorías, dashboard
+### Fase 1 — MVP: transacciones, categorías, dashboard · SIGUIENTE
 
 Alcance: entidades `Account`, `Transaction`, `Category`, `FamilyTag` — **y `ImportProfile` + `ImportRule` vacías**, para que el esquema v1 ya las contenga (§3). Alta/edición/borrado manual. Lista con filtros y búsqueda. Dashboard con saldo, ingresos vs gastos y gasto por categoría. CloudKit funcionando. Categorías sembradas al primer arranque. `VersionedSchema` desde el primer commit. **Export CSV de toda la base de datos**, manual y automático a iCloud Drive.
 
@@ -852,9 +875,9 @@ Las pantallas se prueban a mano contra los criterios de "hecho cuando" de cada f
 |---|---|---|
 | **CloudKit y migraciones de esquema.** Cambiar un modelo con sync activo puede romper la sincronización o requerir migración manual. | Alto | Congelar el esquema de cada fase antes de usar la app con datos reales. Usar `VersionedSchema` y `SchemaMigrationPlan` desde la Fase 1, aunque al principio solo haya una versión. Hacer copia de seguridad (export CSV) antes de cada actualización con cambio de modelo. |
 | **Restricciones de CloudKit sobre el modelo.** Todo opcional o con default, sin `.unique`, sin `.deny`, sin auto-relaciones. | Medio | Ya incorporado en los modelos de §3. Test por reflexión que falle si alguien mete un atributo obligatorio o una relación sin inversa (§7 bis). |
-| **`Decimal` puede perder precisión al viajar por CloudKit.** Todo el diseño monetario se apoya en `Decimal`, pero la serialización a `CKRecord` puede pasar por `Double`. | **Alto** (corrupción silenciosa de importes) | **Fase 0**: verificarlo empíricamente antes de escribir una sola pantalla. Si falla, persistir céntimos en `Int` con `Decimal` computado (§3). Es un cambio de tipo: imposible después de desplegar a Production. |
+| ~~**`Decimal` puede perder precisión al viajar por CloudKit.**~~ | ~~Alto~~ | **RESUELTO en la Fase 0.** Se almacena como `Double`, pero vuelve con igualdad exacta en los 10 valores patológicos y en la suma del lote. Ver `docs/fase0-resultados.md`. |
 | **Esquema de CloudKit en Production es aditivo.** No se pueden borrar campos ni cambiarles el tipo una vez desplegados. | Alto | Meter en el esquema v1 todas las entidades previstas, aunque estén vacías (`ImportProfile`, `ImportRule`). Congelar antes de introducir datos reales. |
-| **Fontanería de CloudKit incompleta.** Falta un entitlement o Background Modes y la sincronización no ocurre, o funciona en debug y no en release. | Alto | Los cuatro puntos de §2 verificados en la Fase 0, incluido el despliegue de esquema a Production. |
+| **Fontanería de CloudKit incompleta.** Falta un entitlement o Background Modes y la sincronización no ocurre, o funciona en debug y no en release. | Medio | Tres de los cuatro puntos de §2 verificados en la Fase 0 sobre el binario firmado. Queda el despliegue de esquema a Production, que hay que repetir con **cada** cambio de modelo. |
 | **Cupo de 64 notificaciones locales pendientes** por app en iOS. Con varias facturas recurrentes se agota y las últimas se pierden en silencio. | Medio | `RecurringBillService` programa una ventana deslizante (siguientes 60 días), no todo el futuro, y reprograma al abrir la app. Criterio de cierre de la Fase 2. |
 | **Aritmética con `Decimal`.** Es fácil colar un `Double` por descuido en un cálculo intermedio. | Alto (corrección silenciosa) | Prohibir `Double` en cualquier tipo relacionado con dinero. Tests de suma sobre 1.000 importes de céntimos comparando con el valor exacto esperado (§7 bis). |
 | **Coste medio con decimales periódicos.** `costeTotal / cantidad` puede no ser exacto (p. ej. 100 € / 3 participaciones). | Medio | Mantener el coste medio a 6 decimales y **derivar siempre el coste total del acumulado**, nunca de `costeMedio × cantidad`. Redondear solo al mostrar. |
@@ -886,8 +909,11 @@ Solo una, y no bloquea nada hasta la Fase 4:
 
 ## 9. Por dónde empezar
 
-1. **Fase 0**: proyecto Xcode, entitlements de iCloud, spike de `Decimal` sobre CloudKit. Medio día, y determina el tipo de todos los campos monetarios de la app.
-2. Escribir los modelos de §3 completos —incluidas `ImportProfile` e `ImportRule`, aunque no se usen hasta la Fase 3— con `VersionedSchema` v1.
+La Fase 0 ya está hecha. El siguiente paso es la Fase 1:
+
+1. Crear el target real `ILoveFinances` en `project.yml`, con el contenedor `iCloud.dev.threedots.ilovefinances`. Lo registra Xcode solo al construir con `-allowProvisioningUpdates`: no hace falta tocar el portal de desarrollador.
+2. Escribir los modelos de §3 completos —incluidas `ImportProfile` e `ImportRule`, aunque no se usen hasta la Fase 3— con `VersionedSchema` v1, y congelar el esquema antes de meter un solo dato real.
 3. Los tests de aritmética y del invariante de CloudKit (§7 bis), antes que las pantallas.
 4. `BackupService` y el export CSV. Es lo que permite equivocarse sin consecuencias durante el resto del desarrollo.
 5. Alta rápida de transacción, que es la pantalla más usada de la app, y la lista.
+6. Borrar el target `Spike` una vez desplegado a Production el esquema del contenedor desechable.

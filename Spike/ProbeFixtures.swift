@@ -11,6 +11,19 @@ enum ProbeFixtures {
         let scale: Int
         /// Por que este valor esta en la lista.
         let rationale: String
+
+        /// Si el valor cabe en su escala sin perder nada.
+        ///
+        /// 0,615 y 0,005 tienen 3 decimales y la escala de centimos solo
+        /// guarda 2: el entero escalado NO puede representarlos. Eso no es un
+        /// fallo del entero ni de CloudKit, es el limite de la escala, y hay
+        /// que distinguirlo de una perdida real o el informe miente.
+        var isRepresentableAtScale: Bool {
+            var multiplied = value * Decimal(scale)
+            var rounded = Decimal()
+            NSDecimalRound(&rounded, &multiplied, 0, .plain)
+            return rounded == multiplied
+        }
     }
 
     /// Escala 10^2 para dinero. Escala 10^6 para cantidades de activo:

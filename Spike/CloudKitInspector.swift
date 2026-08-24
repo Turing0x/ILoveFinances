@@ -70,7 +70,7 @@ enum CloudKitInspector {
             let raw = record[key]
             return FieldDump(
                 name: key,
-                swiftType: raw.map { String(describing: type(of: $0)) } ?? "nil",
+                swiftType: storageType(of: raw),
                 value: describe(raw)
             )
         }
@@ -81,13 +81,37 @@ enum CloudKitInspector {
         )
     }
 
-    /// Imprime el valor sin redondear. Un `String(format:)` con dos decimales
-    /// escondería exactamente lo que se está buscando.
+    /// El tipo de almacenamiento REAL.
+    ///
+    /// No vale `type(of:)`: todo numero llega como `__NSCFNumber`, la clase
+    /// puente de NSNumber, que no distingue un double de un entero. Y tampoco
+    /// vale intentar `as? Double`, porque NSNumber se puentea a Double aunque
+    /// dentro lleve un entero. Lo unico que lo dice es `objCType`.
+    private static func storageType(of value: Any?) -> String {
+        guard let value else { return "nil" }
+        if let number = value as? NSNumber {
+            switch String(cString: number.objCType) {
+            case "d": return "Double"
+            case "f": return "Float"
+            case "q", "l", "i", "s": return "Int64"
+            case "c", "B": return "Bool/Int8"
+            default: return "NSNumber(\(String(cString: number.objCType)))"
+            }
+        }
+        return String(describing: type(of: value))
+    }
+
+    /// Imprime el valor sin redondear, con 20 cifras significativas cuando es
+    /// un double: es la unica forma de ver la diferencia entre 0,01 exacto y el
+    /// double mas cercano a 0,01.
     private static func describe(_ value: Any?) -> String {
         switch value {
-        case let number as Double:  return "\(number)"
-        case let number as Int64:   return "\(number)"
-        case let number as Int:     return "\(number)"
+        case let number as NSNumber:
+            let objCType = String(cString: number.objCType)
+            if objCType == "d" || objCType == "f" {
+                return String(format: "%.20g", number.doubleValue)
+            }
+            return number.stringValue
         case let text as String:    return "\"\(text)\""
         case let data as Data:      return "<\(data.count) bytes>"
         case let date as Date:      return "\(date)"
@@ -119,7 +143,7 @@ enum CloudKitInspector {
             lines.append("Esquema de \(sample.recordType) — tipo REAL de cada campo:")
             lines.append("")
             for field in sample.fields {
-                lines.append("  \(field.name.padded(28))\(field.swiftType.padded(14))\(field.value)")
+                lines.append("  \(field.name.padded(24))\(field.swiftType.padded(12))\(field.value)")
             }
             lines.append("")
         }
@@ -128,11 +152,16 @@ enum CloudKitInspector {
         if let decimalField {
             lines.append("VEREDICTO PARCIAL")
             lines.append("  CD_asDecimal viaja como: \(decimalField.swiftType)")
-            if decimalField.swiftType.contains("Double") {
-                lines.append("  -> Es Double. La perdida de precision es casi segura.")
-                lines.append("     Confirmarlo con el viaje de ida y vuelta (Paso 4).")
+            let intField = dumps.first?.fields.first { $0.name.hasSuffix("asScaledInt") }
+            if let intField {
+                lines.append("  CD_asScaledInt viaja como: \(intField.swiftType)  (referencia: es un Int)")
+            }
+            if decimalField.swiftType == "Double" {
+                lines.append("  -> ES Double. CloudKit no tiene tipo decimal y el mirroring")
+                lines.append("     lo degrada. La perdida de precision es casi segura;")
+                lines.append("     confirmarla con el viaje de ida y vuelta (Paso 4).")
             } else {
-                lines.append("  -> No es Double. Decimal puede sobrevivir intacto.")
+                lines.append("  -> NO es Double. Decimal puede sobrevivir intacto.")
                 lines.append("     Confirmarlo igualmente con el viaje de ida y vuelta.")
             }
         }
