@@ -1,0 +1,12 @@
+# Proyecto generado por XcodeGen: se regenera con `xcodegen generate`
+*.xcodeproj
+
+# Xcode
+DerivedData/
+build/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# macOS
+.DS_Store
