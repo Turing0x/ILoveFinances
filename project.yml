@@ -1,0 +1,38 @@
+name: ILoveFinances
+
+options:
+  bundleIdPrefix: dev.threedots
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  minimumXcodeGenVersion: "2.46.0"
+
+settings:
+  base:
+    # Modo de LENGUAJE Swift 5 con el compilador 6.3. Sin esta linea Xcode 26
+    # activa Swift 6 estricto y ModelContext (no Sendable) da errores de
+    # aislamiento en cada fichero. Ver PLAN.md seccion 2.
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    DEVELOPMENT_TEAM: M2J9PP4RR8
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+
+targets:
+  # Target DESECHABLE. Se borra al cerrar la Fase 0; su valor queda en
+  # docs/fase0-resultados.md. El target real de la app nace en la Fase 1,
+  # cuando ya se sepa de que tipo son los campos de dinero.
+  Spike:
+    type: application
+    platform: iOS
+    sources:
+      - Spike
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.threedots.ilovefinances.spike
+        PRODUCT_NAME: Spike
+        INFOPLIST_FILE: Spike/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Spike/Spike.entitlements
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
