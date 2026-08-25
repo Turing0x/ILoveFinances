@@ -44,6 +44,7 @@ struct TicketEditorView: View {
     @State private var quantityText = "1"
     @State private var unit: UnitOfMeasure = .unit
     @State private var amountText = ""
+    @State private var discountText = ""
     @State private var isOffer = false
     @State private var editingLineID: UUID?
 
@@ -51,10 +52,14 @@ struct TicketEditorView: View {
     @State private var showingNewShop = false
     @State private var newShopName = ""
 
+    // Importacion desde el JSON que devuelve Claude al leer la foto del ticket
+    @State private var showingImport = false
+    @State private var importWarnings: [String] = []
+
     @FocusState private var focus: Field?
 
     private enum Field: Hashable {
-        case name, quantity, amount
+        case name, quantity, amount, discount
     }
 
     /// Linea en construccion. Struct y no `PurchaseLine` a proposito: nada se
@@ -76,6 +81,7 @@ struct TicketEditorView: View {
         NavigationStack {
             Form {
                 headerSection
+                warningsSection
                 entrySection
                 linesSection
             }
@@ -89,6 +95,9 @@ struct TicketEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Guardar", action: save).disabled(!canSave)
                 }
+            }
+            .sheet(isPresented: $showingImport) {
+                TicketImportSheet(onImport: apply)
             }
             .alert("Nueva tienda", isPresented: $showingNewShop) {
                 TextField("Nombre", text: $newShopName)
@@ -114,6 +123,11 @@ struct TicketEditorView: View {
             Button("Nueva tienda…", systemImage: "plus.circle") { showingNewShop = true }
                 .font(.subheadline)
 
+            Button("Pegar ticket en JSON…", systemImage: "doc.on.clipboard") {
+                showingImport = true
+            }
+            .font(.subheadline)
+
             DatePicker("Fecha", selection: $date, displayedComponents: .date)
 
             Picker("Cuenta", selection: $selectedAccount) {
@@ -136,6 +150,26 @@ struct TicketEditorView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Lo que el modelo de lenguaje no supo leer, o leyo raro. Se muestra
+    /// hasta que el usuario lo descarta: importar un ticket a ciegas es como
+    /// se cuelan importes mal leidos de una foto.
+    @ViewBuilder
+    private var warningsSection: some View {
+        if !importWarnings.isEmpty {
+            Section {
+                ForEach(importWarnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                }
+                Button("Entendido", role: .cancel) { importWarnings = [] }
+                    .font(.subheadline)
+            } header: {
+                Text("Revisa esto")
+            }
+            .foregroundStyle(.orange)
         }
     }
 
@@ -172,6 +206,8 @@ struct TicketEditorView: View {
                     .focused($focus, equals: .amount)
                     .multilineTextAlignment(.trailing)
                     .monospacedDigit()
+                    .submitLabel(.next)
+                    .onSubmit { focus = .discount }
 
                 Button {
                     isOffer.toggle()
@@ -181,6 +217,31 @@ struct TicketEditorView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isOffer ? "En oferta" : "Sin oferta")
+            }
+
+            LabeledContent("Descuento") {
+                TextField("0,00", text: $discountText)
+                    .keyboardType(.decimalPad)
+                    .focused($focus, equals: .discount)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+            }
+
+            if let pagado = payableAmount, (parsedDiscount ?? 0) > 0 {
+                HStack(spacing: 6) {
+                    Text("Pagado:")
+                    Text(Money.formatted(pagado)).fontWeight(.medium)
+                    if let cantidad = parsedQuantity,
+                       let rate = PurchaseService.unitPrice(
+                        lineTotal: pagado, quantity: cantidad, unit: unit
+                       ) {
+                        Text("·")
+                        Text(Money.formattedRate(rate, unit: unit.dimension.rateLabel))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(pagado < 0 ? Color.red : Color.secondary)
+                .monospacedDigit()
             }
 
             Button(editingLineID == nil ? "Añadir" : "Guardar línea", action: commitLine)
@@ -306,10 +367,37 @@ struct TicketEditorView: View {
         parseDecimal(amountText)
     }
 
+    /// Vacio significa "sin descuento", no error. El campo es opcional y el
+    /// caso mayoritario de una linea es no llevar ninguno.
+    private var parsedDiscount: Decimal? {
+        guard !discountText.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return parseDecimal(discountText).map { abs($0) }
+    }
+
+    /// Lo que se guarda en la linea: el importe impreso menos su descuento.
+    ///
+    /// El desglose NO se persiste — `PurchaseLine` no tiene campo para el
+    /// descuento y anadirlo pedia `SchemaV2` con el esquema ya en Production.
+    /// El descuento es una ayuda al teclear: se meten los dos numeros del papel
+    /// y la app resta, que es lo que evita restar de cabeza en cada linea.
+    private var payableAmount: Decimal? {
+        guard let amount = parsedAmount else { return nil }
+        return amount - (parsedDiscount ?? 0)
+    }
+
     private var canCommitLine: Bool {
-        !nameText.trimmingCharacters(in: .whitespaces).isEmpty
-            && parsedQuantity != nil
-            && parsedAmount != nil
+        guard !nameText.trimmingCharacters(in: .whitespaces).isEmpty,
+              parsedQuantity != nil,
+              parsedAmount != nil else { return false }
+
+        // Un descuento escrito a medias no puede colarse como "sin descuento".
+        let descuentoEscrito = !discountText.trimmingCharacters(in: .whitespaces).isEmpty
+        if descuentoEscrito && parsedDiscount == nil { return false }
+
+        // Descontar mas de lo que costo dejaria la linea en negativo.
+        guard let pagado = payableAmount, pagado >= 0 else { return false }
+
+        return true
     }
 
     private var canSave: Bool {
@@ -354,6 +442,55 @@ struct TicketEditorView: View {
         }
     }
 
+    /// Vuelca el ticket importado en el formulario. NO guarda nada: deja todo
+    /// listo para revisar, que es el punto — el modelo de lenguaje lee una
+    /// foto y se equivoca, y el papel esta delante para comprobarlo.
+    private func apply(_ ticket: TicketImportService.ParsedTicket) {
+        if let fecha = ticket.date { date = fecha }
+
+        // La tienda del ticket ("MERCADONA") casi nunca coincide con el nombre
+        // que usa Raul ("Mercadona de casa"), asi que se intenta casar y, si no
+        // sale, se deja el picker como estaba y se avisa. Crear tiendas solas
+        // llenaria la lista de duplicados de la misma cadena.
+        if selectedShop == nil, let nombre = ticket.shopName {
+            let buscado = PurchaseService.normalized(nombre)
+            selectedShop = activeShops.first { tienda in
+                let propio = PurchaseService.normalized(tienda.name)
+                return propio == buscado || propio.contains(buscado) || buscado.contains(propio)
+            }
+        }
+
+        let nuevas = ticket.lines.enumerated().map { index, line in
+            DraftLine(
+                id: UUID(),
+                rawName: line.rawName,
+                quantity: line.quantity,
+                unit: line.unit,
+                lineTotal: line.lineTotal,
+                isOffer: line.isOffer,
+                productID: PurchaseService.match(name: line.productName, in: products)?.id,
+                productName: line.productName
+            )
+        }
+        draftLines.append(contentsOf: nuevas)
+
+        var avisos = ticket.warnings
+        if ticket.discountTotal > 0 {
+            avisos.append(
+                "Se aplicaron \(Money.formatted(ticket.discountTotal)) en descuentos. Esas líneas quedan marcadas como oferta."
+            )
+        }
+        if selectedShop == nil, let nombre = ticket.shopName {
+            avisos.append("El ticket es de «\(nombre)» y no hay ninguna tienda que se le parezca. Elígela o créala arriba.")
+        }
+        if let diferencia = ticket.totalMismatch {
+            avisos.append(
+                "El ticket dice \(Money.formatted(ticket.declaredTotal ?? .zero)) y las líneas suman \(Money.formatted(ticket.linesTotal)): faltan \(Money.formatted(diferencia)). Puede ser un descuento del súper o una línea mal leída."
+            )
+        }
+        importWarnings = avisos
+    }
+
     private func createShop() {
         let shop = Shop(name: newShopName, sortOrder: shops.count)
         context.insert(shop)
@@ -373,17 +510,20 @@ struct TicketEditorView: View {
     }
 
     private func commitLine() {
-        guard let quantity = parsedQuantity, let amount = parsedAmount else { return }
+        guard let quantity = parsedQuantity, let pagado = payableAmount else { return }
         let nombre = nameText.trimmingCharacters(in: .whitespaces)
         let existente = PurchaseService.match(name: nombre, in: products)
+        let descuento = parsedDiscount ?? 0
 
         let nueva = DraftLine(
             id: editingLineID ?? UUID(),
             rawName: nombre,
             quantity: quantity,
             unit: unit,
-            lineTotal: amount,
-            isOffer: isOffer,
+            lineTotal: pagado,
+            // Un descuento es una oferta puntual: se marca sola para que quede
+            // fuera del ranking por defecto sin tener que acordarse.
+            isOffer: isOffer || descuento > 0,
             productID: existente?.id,
             productName: existente?.name ?? nombre
         )
@@ -397,12 +537,16 @@ struct TicketEditorView: View {
         resetEntry()
     }
 
+    /// El campo de descuento sale VACIO y el importe muestra lo pagado, no el
+    /// bruto: el desglose no se guarda en ninguna parte (ver `payableAmount`).
+    /// No es un fallo — lo pagado, que es el dato real, esta intacto.
     private func edit(_ line: DraftLine) {
         editingLineID = line.id
         nameText = line.rawName
         quantityText = Money.csvString(line.quantity)
         unit = line.unit
         amountText = Money.csvString(line.lineTotal)
+        discountText = ""
         isOffer = line.isOffer
         focus = .name
     }
@@ -415,6 +559,7 @@ struct TicketEditorView: View {
         quantityText = "1"
         unit = .unit
         amountText = ""
+        discountText = ""
         isOffer = false
         focus = .name
     }
@@ -440,8 +585,14 @@ struct TicketEditorView: View {
         target.shop = shop
         target.isPurchaseTicket = true
 
+        // Cache de los productos creados en ESTE guardado. Sin ella, dos lineas
+        // del mismo producto nuevo —dos bandejas de tomate, o un ticket
+        // importado con repetidos— crearian dos `GroceryProduct` distintos: el
+        // @Query de `products` no se refresca dentro del bucle.
+        var creados: [String: GroceryProduct] = [:]
+
         for (index, draft) in draftLines.enumerated() {
-            let product = resolveProduct(for: draft)
+            let product = resolveProduct(for: draft, creados: &creados)
             let line = PurchaseLine(
                 rawName: draft.rawName,
                 quantity: draft.quantity,
@@ -465,18 +616,89 @@ struct TicketEditorView: View {
 
     /// Producto ya existente, o uno nuevo creado al vuelo con la unidad base de
     /// la dimension que se acaba de teclear.
-    private func resolveProduct(for draft: DraftLine) -> GroceryProduct? {
+    private func resolveProduct(for draft: DraftLine, creados: inout [String: GroceryProduct]) -> GroceryProduct? {
         if let id = draft.productID, let existente = products.first(where: { $0.id == id }) {
             return existente
         }
-        if let porNombre = PurchaseService.match(name: draft.rawName, in: products) {
+        if let porNombre = PurchaseService.match(name: draft.productName, in: products) {
             return porNombre
         }
+        if let porLiteral = PurchaseService.match(name: draft.rawName, in: products) {
+            return porLiteral
+        }
+
+        let clave = PurchaseService.normalized(draft.productName)
+        if let yaCreado = creados[clave] { return yaCreado }
+
         let nuevo = GroceryProduct(
             name: draft.productName,
             comparisonUnit: draft.unit.dimension.baseUnit
         )
         context.insert(nuevo)
+        creados[clave] = nuevo
         return nuevo
+    }
+}
+
+/// Pegar el JSON que devuelve Claude tras leer la foto del ticket.
+///
+/// Solo texto: la app no lee imagenes ni hace OCR. El modelo de lenguaje
+/// trabaja fuera, y aqui entra lo que el usuario copia.
+struct TicketImportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let onImport: (TicketImportService.ParsedTicket) -> Void
+
+    @State private var text = ""
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Button("Pegar del portapapeles", systemImage: "clipboard") {
+                        text = UIPasteboard.general.string ?? ""
+                        errorMessage = nil
+                    }
+                } footer: {
+                    Text("Pídele a Claude que lea la foto del ticket con el prompt guardado y pega aquí su respuesta. El bloque ```json sobra, pero no molesta.")
+                }
+
+                Section("JSON") {
+                    TextEditor(text: $text)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(minHeight: 220)
+                }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Importar ticket")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Importar", action: importar)
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func importar() {
+        do {
+            let ticket = try TicketImportService.parse(text)
+            onImport(ticket)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
