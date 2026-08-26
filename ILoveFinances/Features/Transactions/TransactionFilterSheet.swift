@@ -113,10 +113,6 @@ struct TransactionFilterSheet: View {
     }
 
     private static func parse(_ raw: String) -> Decimal? {
-        guard !raw.isEmpty else { return nil }
-        return Decimal(
-            string: raw.replacingOccurrences(of: ",", with: "."),
-            locale: Locale(identifier: "en_US_POSIX")
-        )
+        Money.parseInput(raw)
     }
 }

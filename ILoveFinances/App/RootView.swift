@@ -15,6 +15,9 @@ struct RootView: View {
             Tab("Movimientos", systemImage: "list.bullet") {
                 TransactionListView()
             }
+            Tab("Bus", systemImage: "bus") {
+                TransportView()
+            }
             Tab("Facturas", systemImage: "calendar.badge.clock") {
                 BillsView()
             }

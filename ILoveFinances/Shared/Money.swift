@@ -51,5 +51,32 @@ enum Money {
         Decimal(string: raw, locale: posixLocale)
     }
 
+    /// Importe **tecleado por el usuario** en un `TextField` con teclado decimal.
+    ///
+    /// El teclado escribe con el separador del idioma del movil, asi que llega
+    /// "1,20" en castellano y "1.20" si alguien tiene el movil en ingles. Se
+    /// aceptan los dos, se quitan los espacios (incluido el fino que mete el
+    /// teclado en algunas configuraciones) y se parsea con locale POSIX, que es
+    /// el unico que entiende el punto sin depender del idioma.
+    ///
+    /// NO valida el signo ni el cero: eso lo decide cada pantalla. El filtro de
+    /// movimientos acepta importes cualesquiera; un alta, no.
+    ///
+    /// Vive aqui porque este mismo parseo estaba copiado en seis vistas, y seis
+    /// copias de una regla de dinero son seis sitios donde se puede colar un
+    /// criterio distinto.
+    static func parseInput(_ raw: String) -> Decimal? {
+        let normalized = raw
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\u{00A0}", with: "")
+            .replacingOccurrences(of: "\u{202F}", with: "")
+            .replacingOccurrences(of: ",", with: ".")
+        // Sin un solo digito no hay importe. Sin esta guarda, un "," suelto
+        // —lo que queda al borrar el campo con el teclado decimal— se parsea
+        // como 0 en vez de como "todavia no hay nada escrito".
+        guard normalized.contains(where: \.isNumber) else { return nil }
+        return Decimal(string: normalized, locale: posixLocale)
+    }
+
     private static let posixLocale = Locale(identifier: "en_US_POSIX")
 }

@@ -72,6 +72,10 @@ struct AccountsView: View {
 
 struct AccountEditor: View {
     let account: Account?
+    /// Tipo con el que se abre un alta nueva. Sirve para que la pestana Bus
+    /// pueda llevar directamente a "crear tarjeta de transporte" sin obligar a
+    /// buscar el tipo en el selector.
+    var initialType: AccountType = .checking
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -80,6 +84,8 @@ struct AccountEditor: View {
     @State private var type: AccountType = .checking
     @State private var openingText = "0"
     @State private var iban = ""
+    @State private var cardNumber = ""
+    @State private var fareText = ""
 
     var body: some View {
         NavigationStack {
@@ -89,7 +95,25 @@ struct AccountEditor: View {
                     ForEach(AccountType.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 TextField("Saldo inicial", text: $openingText).keyboardType(.numbersAndPunctuation)
-                TextField("Últimos 4 del IBAN", text: $iban).keyboardType(.numberPad)
+
+                // Una tarjeta de transporte no tiene IBAN ni aparece en ningun
+                // CSV de banco, asi que el campo solo estorbaria.
+                if type != .transport {
+                    TextField("Últimos 4 del IBAN", text: $iban).keyboardType(.numberPad)
+                }
+
+                if type == .transport {
+                    Section {
+                        TextField("Número de la tarjeta", text: $cardNumber)
+                            .keyboardType(.numbersAndPunctuation)
+                        TextField("Precio por viaje", text: $fareText)
+                            .keyboardType(.decimalPad)
+                    } header: {
+                        Text("Tarjeta de transporte")
+                    } footer: {
+                        Text("El saldo sube con cada recarga (un traspaso desde la cuenta que paga) y baja el precio por viaje cada vez que la usas en el bus.")
+                    }
+                }
 
                 Section {
                     Text("El saldo actual no se guarda: se calcula sumando los movimientos al saldo inicial. Así no puede desincronizarse.")
@@ -101,35 +125,59 @@ struct AccountEditor: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Guardar", action: save).disabled(name.isEmpty)
+                    Button("Guardar", action: save).disabled(!canSave)
                 }
             }
             .onAppear(perform: load)
         }
     }
 
+    /// Sin precio por viaje una tarjeta de transporte no sirve para nada: el
+    /// boton de la pestana Bus no sabria cuanto descontar. Es el unico campo
+    /// que se exige ademas del nombre; el numero de la tarjeta es opcional
+    /// porque hay tarjetas anonimas sin numero visible.
+    private var canSave: Bool {
+        guard !name.isEmpty else { return false }
+        guard type == .transport else { return true }
+        guard let fare = Money.parseInput(fareText) else { return false }
+        return fare > 0
+    }
+
     private func load() {
-        guard let account else { return }
+        guard let account else {
+            type = initialType
+            return
+        }
         name = account.name
         type = account.type
         openingText = Money.csvString(account.openingBalance)
         iban = account.iban ?? ""
+        cardNumber = account.transportCardNumber ?? ""
+        fareText = account.farePerTrip > 0 ? Money.csvString(account.farePerTrip) : ""
     }
 
     private func save() {
-        let opening = Decimal(
-            string: openingText.replacingOccurrences(of: ",", with: "."),
-            locale: Locale(identifier: "en_US_POSIX")
-        ) ?? .zero
+        let opening = Money.parseInput(openingText) ?? .zero
+
+        // Fuera del tipo transporte los dos campos se limpian: dejarlos puestos
+        // en una cuenta corriente seria un dato fantasma que la interfaz ya no
+        // muestra y que nadie volveria a corregir.
+        let esTransporte = type == .transport
+        let numero = esTransporte && !cardNumber.isEmpty ? cardNumber : nil
+        let tarifa = esTransporte ? (Money.parseInput(fareText) ?? .zero) : .zero
 
         if let account {
             account.name = name
             account.type = type
             account.openingBalance = opening
-            account.iban = iban.isEmpty ? nil : iban
+            account.iban = esTransporte || iban.isEmpty ? nil : iban
+            account.transportCardNumber = numero
+            account.farePerTrip = tarifa
         } else {
             context.insert(Account(name: name, type: type, openingBalance: opening,
-                                   iban: iban.isEmpty ? nil : iban))
+                                   iban: esTransporte || iban.isEmpty ? nil : iban,
+                                   transportCardNumber: numero,
+                                   farePerTrip: tarifa))
         }
         try? context.save()
         dismiss()

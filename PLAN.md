@@ -202,6 +202,8 @@ final class Account {
     var openingBalance: Decimal = Decimal.zero   // saldo al dar de alta
     var iban: String?                            // últimos 4 dígitos, solo para reconocer el CSV
     var colorHex: String?
+    var transportCardNumber: String?             // solo tipo .transport (Fase 6)
+    var farePerTrip: Decimal = Decimal.zero      // solo tipo .transport (Fase 6)
     var isArchived: Bool = false
     var createdAt: Date = Date()
 
@@ -229,8 +231,11 @@ enum AccountType: String, Codable, CaseIterable {
     case card          // tarjeta de crédito
     case cash          // efectivo
     case brokerage     // bróker / cuenta de valores
+    case transport     // tarjeta de transporte (bus) — Fase 6
 }
 ```
+
+Una **tarjeta de transporte** (Fase 6) es una cuenta más, y por eso no necesitó entidad propia: se recarga con un traspaso y cada viaje es un gasto sobre ella misma por `farePerTrip`. El saldo, los viajes restantes y el gasto del mes salen todos del cálculo de abajo.
 
 El saldo actual **no se persiste**: se calcula como `openingBalance + Σ ingresos − Σ gastos ∓ traspasos`, sumando `transactions` e `incomingTransfers` con la función `signedAmount(for:)` de más abajo. Persistirlo obliga a mantenerlo consistente en cada alta, edición, borrado e importación, y con sync CloudKit entre dos dispositivos eso se desincroniza. Si el cálculo pesa, se cachea en memoria por sesión, no en disco.
 
@@ -733,10 +738,12 @@ API para lo que se pueda resolver por ticker (acciones, ETFs cotizados), entrada
 
 ## 6. Pantallas y navegación
 
-`TabView` de cuatro pestañas. Solo iPhone: no hay `NavigationSplitView` ni layout adaptativo. Cada pantalla se diseña una vez, para un ancho.
+`TabView`. Solo iPhone: no hay `NavigationSplitView` ni layout adaptativo. Cada pantalla se diseña una vez, para un ancho.
+
+Lo planificado eran cuatro pestañas; hoy son cinco, con Compras (Fase 5) y Bus (Fase 6), e Inversiones aún sin construir:
 
 ```
-┌─ Resumen ─────────── Movimientos ──── Facturas ──── Inversiones ─┐
+┌─ Resumen ──── Movimientos ──── Bus ──── Facturas ──── Compras ─┐
 ```
 
 ### Resumen (Dashboard)
@@ -759,6 +766,13 @@ API para lo que se pueda resolver por ticker (acciones, ETFs cotizados), entrada
 - Detalle: edición completa, foto de ticket, transacciones relacionadas (mismo comercio).
 
 **Alta rápida.** Es la pantalla más usada de la app y merece optimización: teclado numérico enfocado al abrir, importe primero, categoría con las 6 más usadas recientemente accesibles de un toque, fecha por defecto hoy. Guardar y cerrar en tres toques.
+
+### Bus (Fase 6)
+
+- Tarjeta de transporte seleccionada con saldo grande y "Quedan N viajes". Selector solo si hay más de una.
+- Botón **"Utilizada en viaje"** con confirmación, que descuenta `farePerTrip`. Es la razón de ser de la pestaña: dos toques.
+- Aviso de "Deshacer" durante 8 s, y viajes del mes con deslizar para borrar.
+- Atajo a **Recargar**, que abre el alta rápida como traspaso hacia la tarjeta.
 
 ### Facturas
 
@@ -890,9 +904,22 @@ Alcance: entidades `Shop`, `GroceryProduct` y `PurchaseLine`, más `Transaction.
 - Borrar un ticket borra sus líneas; borrar un producto **no** borra el histórico.
 - La copia CSV exporta y restaura los tickets enteros, y una copia anterior a esta fase sigue restaurando.
 
+### Fase 6 — Tarjetas de transporte y pestaña Bus · CERRADA EN CÓDIGO (26/08/2026), pendiente de dispositivo
+
+Detalle en **`docs/fase6-transporte.md`**. Resumen:
+
+- `AccountType.transport` + `Account.transportCardNumber` y `Account.farePerTrip`. Primer cambio de modelo **después** del despliegue a Production: se estrenó `SchemaV2`. **Sin `MigrationStage`**, porque un stage ligero entre dos versiones que describen las mismas clases hace abortar la app en `NSLightweightMigrationStage.init`; el detalle y la regla para el próximo cambio, en el documento.
+- Recarga = traspaso a la tarjeta. Viaje = gasto sobre la propia tarjeta por el precio configurado. El gasto se reconoce al viajar, no al recargar (decisión cerrada #3 aplicada a otro sitio). El saldo sigue siendo derivado: cero campos de saldo nuevos.
+- `TransportService` con el registro y el deshacer del viaje, fuera de las vistas. Saldo insuficiente avisa, no bloquea.
+- Quinta pestaña **Bus** (`Resumen · Movimientos · Bus · Facturas · Compras`): saldo, viajes restantes, botón "Utilizada en viaje" con confirmación, aviso de deshacer de 8 s, viajes del mes con swipe, y atajo a recargar.
+- **El widget se descartó**: obligaba a mover el store SwiftData a un App Group, la operación de más riesgo del proyecto, a cambio de ahorrar abrir la app. Queda como candidato futuro; `TransportService` ya está listo para que lo llame otro proceso.
+- Limpieza incluida: `Money.parseInput`, que estaba copiado en seis vistas y en las seis parseaba un `","` suelto como 0.
+
+**Pendiente antes de darla por cerrada del todo:** export CSV, prueba en dispositivo contra los criterios del documento, y **redesplegar el esquema a Production** en cuanto se guarde la primera tarjeta.
+
 ### Fuera de fases (candidatos futuros)
 
-Widget de pantalla de inicio con el gasto del mes. Presupuestos por categoría con aviso al superar. Líneas de ajuste en los tickets (cupón global, bolsa, envase): el esquema ya las admite, solo falta ofrecerlas en la interfaz. Atajos de Siri / App Intents para "apunta 12 euros en comida". Exportación a PDF del resumen anual. Face ID al abrir. Cálculo FIFO paralelo al coste medio, si algún día las cifras van a la declaración.
+Widget de pantalla de inicio con el gasto del mes. Widget del bus, en pantalla de inicio o en el Centro de Control (`ControlWidget`), con un toque = un viaje: descartado en la Fase 6 por el coste de mover el store a un App Group, no por falta de utilidad. Presupuestos por categoría con aviso al superar. Líneas de ajuste en los tickets (cupón global, bolsa, envase): el esquema ya las admite, solo falta ofrecerlas en la interfaz. Atajos de Siri / App Intents para "apunta 12 euros en comida". Exportación a PDF del resumen anual. Face ID al abrir. Cálculo FIFO paralelo al coste medio, si algún día las cifras van a la declaración.
 
 ---
 
@@ -961,7 +988,7 @@ Solo una, y no bloquea nada hasta la Fase 4:
 
 ## 9. Por dónde empezar
 
-Fases 0, 1, 2 y 5 cerradas. El siguiente paso es la Fase 3:
+Fases 0, 1, 2, 5 y 6 cerradas (la 6, a falta de la prueba en dispositivo y del despliegue de esquema que describe `docs/fase6-transporte.md`). El siguiente paso es la Fase 3:
 
 0. **Desplegar el esquema a Production otra vez en cuanto se guarde el primer `ImportProfile` o `ImportRule`.** Sus `RecordType` todavía no existen allí (§8); hasta que se desplieguen, el sync de esas dos entidades falla sin decir nada.
 1. Revisar `ImportProfile` e `ImportRule` contra un CSV real del banco antes de escribir código. **Ya no hay ventana barata**: el esquema está desplegado a Production, así que cualquier campo que falte entra con `SchemaV2` + `MigrationStage` y copia de seguridad previa. Añadir campos sigue siendo legal; borrarlos o cambiarles el tipo, no.

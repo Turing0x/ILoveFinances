@@ -17,10 +17,25 @@ struct BillPrefill {
     let occurrenceDate: Date
 }
 
+/// Datos con los que se abre el alta al recargar una tarjeta de transporte
+/// (Fase 6).
+///
+/// La recarga es un TRASPASO, no un gasto: el dinero cambia de sitio, y el
+/// gasto se reconoce despues, viaje a viaje. Lo unico que se prellena es el
+/// destino y el tipo; el importe lo teclea quien recarga, porque cambia cada
+/// vez.
+struct TransportRechargePrefill: Identifiable {
+    let card: Account
+
+    var id: UUID { card.id }
+}
+
 struct QuickAddView: View {
     /// `nil` en el alta normal, que se comporta exactamente igual que antes:
     /// esta pantalla no puede perder sus tres toques.
     var prefill: BillPrefill?
+    /// Recarga de una tarjeta de transporte. Excluyente con `prefill`.
+    var recharge: TransportRechargePrefill?
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -100,7 +115,7 @@ struct QuickAddView: View {
                     }
                 }
             }
-            .navigationTitle(prefill == nil ? "Nuevo movimiento" : "Pagar factura")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -114,10 +129,28 @@ struct QuickAddView: View {
         }
     }
 
+    private var title: String {
+        if prefill != nil { return "Pagar factura" }
+        if recharge != nil { return "Recargar tarjeta" }
+        return "Nuevo movimiento"
+    }
+
     /// Con factura, el formulario llega relleno y el foco sigue en el importe:
-    /// lo unico que suele cambiar.
+    /// lo unico que suele cambiar. Con recarga, igual: el destino y el tipo
+    /// vienen puestos y solo falta cuanto se ha recargado.
     private func load() {
         amountFocused = true
+
+        if let recharge {
+            kind = .transfer
+            counterpartAccount = recharge.card
+            // Origen: la primera cuenta que NO sea la tarjeta. Recargar una
+            // tarjeta desde si misma no significa nada.
+            selectedAccount = activeAccounts.first { $0.id != recharge.card.id }
+            note = "Recarga \(recharge.card.name)"
+            return
+        }
+
         guard let prefill else {
             if selectedAccount == nil { selectedAccount = activeAccounts.first }
             return
@@ -181,14 +214,10 @@ struct QuickAddView: View {
 
     // MARK: - Guardar
 
-    /// El teclado decimal escribe con la coma del idioma del movil, asi que se
-    /// acepta coma o punto y se normaliza antes de parsear con locale POSIX.
+    /// Un alta exige importe positivo: `Money.parseInput` acepta cualquier
+    /// decimal, el filtro de aqui es lo que impide guardar un gasto de cero.
     private var parsedAmount: Decimal? {
-        let normalized = amountText
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: ",", with: ".")
-        guard let value = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
-              value > 0 else { return nil }
+        guard let value = Money.parseInput(amountText), value > 0 else { return nil }
         return value
     }
 

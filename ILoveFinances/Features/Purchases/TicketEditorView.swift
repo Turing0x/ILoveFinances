@@ -404,14 +404,8 @@ struct TicketEditorView: View {
         selectedShop != nil && selectedAccount != nil && !draftLines.isEmpty
     }
 
-    /// El teclado decimal escribe con la coma del idioma del movil: se acepta
-    /// coma o punto y se parsea con locale POSIX. Mismo criterio que
-    /// `QuickAddView.parsedAmount`.
     private func parseDecimal(_ text: String) -> Decimal? {
-        let normalized = text
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: ",", with: ".")
-        return Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX"))
+        Money.parseInput(text)
     }
 
     // MARK: - Acciones

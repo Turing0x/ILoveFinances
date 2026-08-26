@@ -12,7 +12,7 @@ struct BackupRoundTripTests {
 
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
-            for: Schema(SchemaV1.models),
+            for: Schema(SchemaV2.models),
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)
@@ -347,6 +347,64 @@ struct BackupRoundTripTests {
         #expect(ticket.sortedLines.isEmpty)
         // El gasto sobrevive aunque el detalle no: el dinero se gasto igual.
         #expect(ticket.amount == Decimal(string: "8.95")!)
+    }
+
+    // MARK: - Transporte (Fase 6)
+
+    /// Fixture aparte por el mismo motivo que `poblarCompras`: los recuentos de
+    /// `idaYVuelta` son exactos y una cuenta mas los rompe todos.
+    @Test("Los campos de una tarjeta de transporte sobreviven a la ida y vuelta")
+    func tarjetaDeTransporteIdaYVuelta() throws {
+        let origen = try makeContext()
+        let tarjeta = Account(name: "Bus Urbano", type: .transport,
+                              openingBalance: Decimal(string: "20.00")!,
+                              transportCardNumber: "0001234567",
+                              farePerTrip: Decimal(string: "1.20")!)
+        origen.insert(tarjeta)
+        origen.insert(Transaction(amount: Decimal(string: "1.20")!, kind: .expense,
+                                  note: "Viaje", account: tarjeta))
+        try origen.save()
+
+        let ficheros = try BackupService.export(context: origen)
+        let destino = try makeContext()
+        try BackupService.restoreReplacingAll(files: ficheros, context: destino)
+
+        let restaurada = try #require(try destino.fetch(FetchDescriptor<Account>()).first)
+        #expect(restaurada.type == .transport)
+        #expect(restaurada.transportCardNumber == "0001234567")
+        #expect(restaurada.farePerTrip == Decimal(string: "1.20")!)
+        #expect(restaurada.balance == Decimal(string: "18.80")!)
+    }
+
+    /// Una copia hecha ANTES de la Fase 6 no trae las dos columnas nuevas. Tiene
+    /// que restaurar igual: si no, la copia de seguridad deja de servir justo el
+    /// dia que hace falta.
+    @Test("Una copia anterior a la Fase 6, sin las columnas nuevas, sigue restaurando")
+    func copiaAntiguaSinColumnasDeTransporte() throws {
+        let id = UUID()
+        let antigua = """
+        id,name,type,openingBalance,iban,colorHex,isArchived,createdAt
+        \(id.uuidString),Corriente,checking,1000.00,1234,,false,2026-01-15T10:00:00Z
+        """
+
+        var ficheros: [String: String] = [
+            BackupService.FileName.accounts: antigua,
+            BackupService.FileName.categories: "id,name,symbolName,colorHex,kind,isSystem,sortOrder,parentID,createdAt",
+            BackupService.FileName.familyTags: "id,name,colorHex,sortOrder,createdAt",
+            BackupService.FileName.transactions: "id,date,amount,kind,note,merchant,accountID,counterpartAccountID,categoryID,familyTagID,recurringBillID,occurrenceDate,isRecurringInstance,importHash,importBatchID,createdAt",
+        ]
+        // Los ficheros de la Fase 5 tampoco existian; el importador ya los da
+        // por vacios cuando faltan (lo fija `restauraCopiaAnteriorALaFase5`).
+        ficheros[BackupService.FileName.manifest] = nil
+
+        let destino = try makeContext()
+        let resumen = try BackupService.restoreReplacingAll(files: ficheros, context: destino)
+
+        #expect(resumen.accounts == 1)
+        let cuenta = try #require(try destino.fetch(FetchDescriptor<Account>()).first)
+        #expect(cuenta.name == "Corriente")
+        #expect(cuenta.transportCardNumber == nil)
+        #expect(cuenta.farePerTrip == .zero)
     }
 
 }

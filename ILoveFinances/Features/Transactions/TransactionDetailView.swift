@@ -97,9 +97,6 @@ struct TransactionDetailView: View {
     }
 
     private static func parse(_ raw: String) -> Decimal? {
-        Decimal(
-            string: raw.replacingOccurrences(of: ",", with: "."),
-            locale: Locale(identifier: "en_US_POSIX")
-        )
+        Money.parseInput(raw)
     }
 }

@@ -149,10 +149,7 @@ struct BillEditorView: View {
     }
 
     private func save() {
-        let amount = Decimal(
-            string: amountText.replacingOccurrences(of: ",", with: "."),
-            locale: Locale(identifier: "en_US_POSIX")
-        ) ?? .zero
+        let amount = Money.parseInput(amountText) ?? .zero
 
         if let bill {
             bill.name = name

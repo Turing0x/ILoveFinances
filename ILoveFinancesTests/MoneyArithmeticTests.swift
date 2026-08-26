@@ -54,4 +54,22 @@ struct MoneyArithmeticTests {
         let valor = Decimal(string: "1234.56")!
         #expect(Money.csvString(valor) == "1234.56")
     }
+
+    // MARK: - Importe tecleado (Fase 6)
+
+    /// `Money.parseInput` sustituyo a seis copias del mismo parseo repartidas
+    /// por las vistas. Estos casos son los que cada copia tenia que acertar por
+    /// su cuenta.
+    @Test("El importe tecleado se lee con coma o con punto", arguments: [
+        ("1,20", "1.20"), ("1.20", "1.20"), ("0,05", "0.05"),
+        ("1 234,50", "1234.50"), ("-3,40", "-3.40"), ("0", "0"),
+    ])
+    func importeTecleado(entrada: String, esperado: String) {
+        #expect(Money.parseInput(entrada) == Decimal(string: esperado, locale: Locale(identifier: "en_US_POSIX"))!)
+    }
+
+    @Test("Un importe vacio o ilegible no se inventa", arguments: ["", "   ", "abc", ","])
+    func importeIlegible(entrada: String) {
+        #expect(Money.parseInput(entrada) == nil)
+    }
 }

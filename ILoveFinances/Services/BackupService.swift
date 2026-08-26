@@ -62,7 +62,7 @@ enum BackupService {
                     "transactions", "recurringBills", "shops", "products", "purchaseLines",
                 ],
                 rows: [[
-                    "\(SchemaV1.versionIdentifier)",
+                    "\(SchemaV2.versionIdentifier)",
                     CSVCodec.string(from: Date()),
                     "\(accounts.count)", "\(categories.count)",
                     "\(familyTags.count)", "\(transactions.count)",
@@ -71,7 +71,11 @@ enum BackupService {
                 ]]
             ),
             FileName.accounts: CSVCodec.encode(
-                header: ["id", "name", "type", "openingBalance", "iban", "colorHex", "isArchived", "createdAt"],
+                // Las dos ultimas columnas entraron en la Fase 6. Van al final
+                // y se leen por nombre, asi que una copia anterior —que no las
+                // trae— sigue restaurando.
+                header: ["id", "name", "type", "openingBalance", "iban", "colorHex", "isArchived", "createdAt",
+                         "transportCardNumber", "farePerTrip"],
                 rows: accounts.map { account in
                     [
                         account.id.uuidString, account.name, account.typeRaw,
@@ -79,6 +83,8 @@ enum BackupService {
                         account.iban ?? "", account.colorHex ?? "",
                         CSVCodec.string(from: account.isArchived),
                         CSVCodec.string(from: account.createdAt),
+                        account.transportCardNumber ?? "",
+                        CSVCodec.string(from: account.farePerTrip),
                     ]
                 }
             ),
@@ -302,7 +308,9 @@ enum BackupService {
                 type: AccountType(rawValue: row["type"] ?? "") ?? .checking,
                 openingBalance: CSVCodec.decimal(from: row["openingBalance"] ?? "") ?? .zero,
                 iban: emptyToNil(row["iban"]),
-                colorHex: emptyToNil(row["colorHex"])
+                colorHex: emptyToNil(row["colorHex"]),
+                transportCardNumber: emptyToNil(row["transportCardNumber"]),
+                farePerTrip: CSVCodec.decimal(from: row["farePerTrip"] ?? "") ?? .zero
             )
             account.id = id
             account.isArchived = CSVCodec.bool(from: row["isArchived"] ?? "")

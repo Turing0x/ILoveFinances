@@ -14,7 +14,7 @@ import Testing
 @Suite("Invariantes de CloudKit sobre el esquema")
 struct SchemaInvariantTests {
 
-    private var schema: Schema { Schema(SchemaV1.models) }
+    private var schema: Schema { Schema(SchemaV2.models) }
 
     @Test("Ningun atributo es obligatorio sin valor por defecto")
     func todoOpcionalOConDefecto() {
@@ -79,7 +79,7 @@ struct SchemaInvariantTests {
         #expect(infractores.isEmpty, "Auto-referencial: \(infractores.joined(separator: ", "))")
     }
 
-    @Test("El esquema v1 contiene las diez entidades, importacion, facturas y compras incluidas")
+    @Test("El esquema contiene las diez entidades, importacion, facturas y compras incluidas")
     func diezEntidades() {
         let nombres = Set(schema.entities.map(\.name))
         #expect(nombres == [
@@ -87,6 +87,16 @@ struct SchemaInvariantTests {
             "FamilyTag", "ImportProfile", "ImportRule", "RecurringBill",
             "Shop", "GroceryProduct", "PurchaseLine",
         ])
+    }
+
+    /// El contenedor de la app usa `SchemaV2` (Fase 6). Si alguien lo cambia sin
+    /// tocar el plan de migracion, o al reves, esto lo pilla: el esquema que se
+    /// valida arriba tiene que ser el ULTIMO del plan, que es el que la app abre.
+    @Test("El plan de migracion termina en la version que la app usa")
+    func planTerminaEnLaVersionActual() {
+        let ultima = ILoveFinancesMigrationPlan.schemas.last
+        #expect(ultima?.versionIdentifier == SchemaV2.versionIdentifier)
+        #expect(SchemaV2.versionIdentifier > SchemaV1.versionIdentifier)
     }
 
     /// La casa usa `.nullify` en todas partes. `Transaction.purchaseLines` es
