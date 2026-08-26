@@ -148,7 +148,7 @@ struct TransportView: View {
                 Text(card.name).tag(Optional(card.id))
             }
         }
-        .pickerStyle(.segmented)
+        .pickerStyle(.menu)
     }
 
     private func remainingText(_ card: Account) -> String {

@@ -55,8 +55,16 @@ struct DashboardView: View {
         items.filter { $0.kind == .expense }.reduce(Decimal.zero) { $0 + $1.amount }
     }
 
+    /// El saldo total es "dinero disponible": una tarjeta de transporte se va
+    /// gastando viaje a viaje y no representa eso, asi que queda fuera tanto
+    /// del total como del desglose de abajo. Su saldo sigue viendose donde
+    /// vive de forma natural: la pestana Bus.
+    private var accountsForBalance: [Account] {
+        accounts.filter { !$0.isArchived && $0.type != .transport }
+    }
+
     private var totalBalance: Decimal {
-        accounts.filter { !$0.isArchived }.reduce(Decimal.zero) { $0 + $1.balance }
+        accountsForBalance.reduce(Decimal.zero) { $0 + $1.balance }
     }
 
     private struct Slice: Identifiable {
@@ -149,14 +157,14 @@ struct DashboardView: View {
             LabeledContent("Todas las cuentas") {
                 SignedAmountText(value: totalBalance, font: .title3.bold())
             }
-            ForEach(accounts.filter { !$0.isArchived }) { account in
+            ForEach(accountsForBalance) { account in
                 LabeledContent {
                     SignedAmountText(value: account.balance, font: .callout)
                 } label: {
                     Label(account.name, systemImage: account.type.symbolName)
                 }
             }
-            if accounts.isEmpty {
+            if accountsForBalance.isEmpty {
                 Text("Añade una cuenta en Ajustes para empezar.")
                     .font(.caption).foregroundStyle(.secondary)
             }
