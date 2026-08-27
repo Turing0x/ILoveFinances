@@ -2,7 +2,7 @@
 
 App **iPhone** de finanzas familiares para uso personal de Raúl. SwiftUI + SwiftData, **iOS 26+**, euro como única divisa, sin backend propio.
 
-Estado del documento: **Fases 0, 1, 2 y 5 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). **Esquema desplegado a CloudKit Production el 24/08/2026**: desde esa fecha, todo cambio de modelo exige `SchemaV2` + `MigrationStage`. En Production hay **7 de los 10** `RecordType`; los tres que faltan se despliegan cuando se usen (ver §8). La Fase 3 puede empezar.
+Estado del documento: **Fases 0, 1, 2 y 5 cerradas** (24 de agosto de 2026; resultados de la Fase 0 en `docs/fase0-resultados.md`). **Esquema desplegado a CloudKit Production el 24/08/2026**: desde esa fecha, todo cambio de modelo exige `SchemaV2` + `MigrationStage`. En Production hay **7 de los 10** `RecordType`; los tres que faltan se despliegan cuando se usen (ver §8). La Fase 3 puede empezar. **Fase 7 (27/08/2026): `RecurringBill.kindRaw` y `SchemaV3`** — aditivo, pendiente de redesplegar a Production.
 
 > La **Fase 5** (tickets de compra y comparador de precios) no estaba planificada y se adelanto a las Fases 3 y 4: necesitaba entrar en el esquema v1 **antes** del despliegue a Production, que es la ultima ventana en que se pueden anadir entidades en sitio. Ver la seccion de fases.
 
@@ -379,7 +379,7 @@ final class FamilyTag {
 
 Deliberadamente pobre: sin email, sin permisos, sin identidad. Es una etiqueta de color con nombre, sirve para filtrar y para el desglose "quién gasta qué". Si en el futuro hiciera falta un usuario real, se crea una entidad `User` nueva y esta se queda como está.
 
-#### `RecurringBill` — factura recurrente
+#### `RecurringBill` — recurrente: factura o ingreso (Fase 7)
 
 ```swift
 @Model
@@ -388,6 +388,7 @@ final class RecurringBill {
     var name: String = ""                    // "Endesa", "Hipoteca"
     var estimatedAmount: Decimal = Decimal.zero
     var isVariableAmount: Bool = false       // luz sí, hipoteca no
+    var kindRaw: String = TransactionKind.expense.rawValue   // expense | income (Fase 7)
     var recurrenceRaw: String = Recurrence.monthly.rawValue
     var dayOfMonth: Int = 1                  // día previsto de cargo
     var startDate: Date = Date()
@@ -740,10 +741,10 @@ API para lo que se pueda resolver por ticker (acciones, ETFs cotizados), entrada
 
 `TabView`. Solo iPhone: no hay `NavigationSplitView` ni layout adaptativo. Cada pantalla se diseña una vez, para un ancho.
 
-Lo planificado eran cuatro pestañas; hoy son cinco, con Compras (Fase 5) y Bus (Fase 6), e Inversiones aún sin construir:
+Lo planificado eran cuatro pestañas; hoy son cinco, con Compras (Fase 5) y Bus (Fase 6), e Inversiones aún sin construir. Facturas pasó a **Recurrentes** en la Fase 7, cuando dejó de ser solo gasto:
 
 ```
-┌─ Resumen ──── Movimientos ──── Bus ──── Facturas ──── Compras ─┐
+┌─ Resumen ──── Movimientos ──── Bus ──── Recurrentes ──── Compras ─┐
 ```
 
 ### Resumen (Dashboard)
@@ -752,7 +753,8 @@ Lo planificado eran cuatro pestañas; hoy son cinco, con Compras (Fase 5) y Bus 
 - Tarjeta de saldo total (suma de cuentas activas), con desglose desplegable por cuenta.
 - Ingresos vs gastos del periodo, con variación respecto al periodo anterior. **Los traspasos no computan** (`incomeExpenseAmount`, §3).
 - Gráfico de gasto por categoría (Swift Charts, donut o barras horizontales). Tocar un segmento navega a los movimientos filtrados.
-- Próximas facturas (siguientes 30 días), con importe estimado y estado.
+- Recurrentes (Fase 7): gasto fijo, ingreso fijo y neto, mensual y anual.
+- Próximos 30 días de recurrentes, con importe estimado y estado, y los totales a pagar y a cobrar **separados**.
 - Valor de la cartera y P&L no realizado (a partir de Fase 4).
 - Desglose por miembro de la familia si hay más de un `FamilyTag` en uso.
 
@@ -774,11 +776,13 @@ Lo planificado eran cuatro pestañas; hoy son cinco, con Compras (Fase 5) y Bus 
 - Aviso de "Deshacer" durante 8 s, y viajes del mes con deslizar para borrar.
 - Atajo a **Recargar**, que abre el alta rápida como traspaso hacia la tarjeta.
 
-### Facturas
+### Recurrentes (Facturas + ingresos desde la Fase 7)
 
-- Sección "Próximas": ocurrencias calculadas de los siguientes 60 días, ordenadas por fecha, con acción `Marcar pagada` que abre el alta prellenada con importe estimado y categoría.
-- Sección "Todas": listado de `RecurringBill` activas e inactivas.
-- Detalle: configuración, historial de pagos con el importe real de cada mes y su gráfico — útil para las variables como la luz.
+- Selector arriba: **Gastos | Ingresos | Todo**, recordado entre sesiones.
+- Sección "Resumen": gasto fijo, ingreso fijo y neto, mensual y anual. Cada importe se reparte por su periodicidad — un anual de 600 € cuenta 50 € al mes.
+- Sección "Próximas": ocurrencias calculadas de los siguientes 60 días, ordenadas por fecha, con acción `Marcar pagada` —o `Cobrada`— que abre el alta prellenada con importe estimado, tipo y categoría.
+- Listado de `RecurringBill` activos e inactivos, del tipo que se esté mirando.
+- Detalle: configuración, historial de pagos o cobros con el importe real de cada mes y su gráfico — útil para las variables como la luz, y para las suscripciones que varían.
 
 ### Inversiones
 
@@ -916,6 +920,19 @@ Detalle en **`docs/fase6-transporte.md`**. Resumen:
 - Limpieza incluida: `Money.parseInput`, que estaba copiado en seis vistas y en las seis parseaba un `","` suelto como 0.
 
 **Pendiente antes de darla por cerrada del todo:** export CSV, prueba en dispositivo contra los criterios del documento, y **redesplegar el esquema a Production** en cuanto se guarde la primera tarjeta.
+
+### Fase 7 — Ingresos recurrentes y pestaña Recurrentes · CERRADA EN CÓDIGO (27/08/2026), pendiente de dispositivo
+
+Detalle en **`docs/fase7-ingresos-recurrentes.md`**. Resumen:
+
+- Un **atributo** en `RecurringBill`, `kindRaw`, con default `"expense"`: un ingreso recurrente es una factura con el signo cambiado, y una entidad nueva habría costado un `RecordType` sin desplegar (que falla en silencio), un CSV de copia nuevo y duplicar servicio, planificador y vistas. Las filas ya sincronizadas siguen siendo gastos sin convertir nada.
+- `SchemaV3`, **sin `MigrationStage`** por el mismo motivo que la Fase 6: mismas clases, mismo checksum, y CoreData añade una columna con default por su cuenta.
+- `Recurrence.occurrencesPerYear` + `RecurringBillService.summary`: gasto fijo, ingreso fijo y neto, mensual y anual. El mensual sale del anual para no desviar céntimos. Cuenta lo vigente, incluido lo que empieza en el futuro.
+- Cuarta pestaña renombrada a **Recurrentes** con selector Gastos | Ingresos | Todo, y tarjeta de resumen también en el Dashboard, donde el "total estimado a 30 días" —ciego al signo— se parte en a pagar y a cobrar.
+- Avisos también para los cobros ("Entran 1.800,00 € el 30"). El cupo de 64 pasa a compartirse, y el corte sigue siendo por fecha.
+- 12 tests nuevos; la suite queda en **112**.
+
+**Pendiente antes de darla por cerrada del todo:** prueba en dispositivo contra los criterios del documento y **redesplegar el esquema a Production**, sin lo cual los ingresos no sincronizan.
 
 ### Fuera de fases (candidatos futuros)
 

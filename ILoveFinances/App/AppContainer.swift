@@ -10,9 +10,10 @@ enum AppContainer {
     /// dicho por que: seguir en silencio significaria que el usuario mete
     /// meses de datos creyendo que se sincronizan.
     static func make() -> (container: ModelContainer, degradedReason: String?) {
-        // SchemaV2 desde la Fase 6. El plan de migracion cubre el salto desde
-        // un store en v1 con un stage ligero.
-        let schema = Schema(SchemaV2.models)
+        // SchemaV3 desde la Fase 7 (`RecurringBill.kindRaw`). Las tres
+        // versiones comparten clases: el salto entre ellas es una columna nueva
+        // con default y lo resuelve CoreData sin stage.
+        let schema = Schema(SchemaV3.models)
         do {
             let container = try ModelContainer(
                 for: schema,

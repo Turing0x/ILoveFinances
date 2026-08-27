@@ -226,6 +226,60 @@ enum RecurringBillService {
         return result.sorted { ($0.date, $0.bill.name) < ($1.date, $1.bill.name) }
     }
 
+    // MARK: - Resumen mensual y anual
+
+    /// Lo que se compromete y lo que entra, normalizado.
+    ///
+    /// Importes MENSUALES y ANUALES equivalentes, no lo que cae este mes en
+    /// concreto: un seguro anual de 600 € pesa 50 € todos los meses aunque solo
+    /// se cobre en junio. Es la cifra que sirve para saber con cuanto se cuenta,
+    /// que es distinta de la de la seccion "Proximas".
+    struct Summary: Equatable {
+        var monthlyExpense: Decimal = .zero
+        var annualExpense: Decimal = .zero
+        var monthlyIncome: Decimal = .zero
+        var annualIncome: Decimal = .zero
+
+        /// Positivo = sobra. Es la cifra que responde a "con cuanto me quedo
+        /// cada mes antes de gastar en nada suelto".
+        var monthlyNet: Decimal { monthlyIncome - monthlyExpense }
+        var annualNet: Decimal { annualIncome - annualExpense }
+    }
+
+    /// Suma de todos los recurrentes VIGENTES.
+    ///
+    /// Vigente = activo y no terminado. Las que empiezan en el futuro SI cuentan
+    /// a proposito: un alquiler que arranca el mes que viene ya es un
+    /// compromiso, y descubrirlo el dia 1 es justo lo que esta pantalla existe
+    /// para evitar.
+    static func summary(
+        bills: [RecurringBill],
+        on date: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Summary {
+        let today = calendar.startOfDay(for: date)
+        var summary = Summary()
+
+        for bill in bills {
+            guard bill.isActive else { continue }
+            if let endDate = bill.endDate, calendar.startOfDay(for: endDate) < today { continue }
+
+            let annual = Money.rounded(bill.estimatedAmount * bill.recurrence.occurrencesPerYear)
+            // El mensual sale del anual, no al reves: redondear primero el
+            // mensual y multiplicarlo por doce desvia hasta doce centimos.
+            let monthly = Money.rounded(annual / 12)
+
+            if bill.isIncome {
+                summary.annualIncome += annual
+                summary.monthlyIncome += monthly
+            } else {
+                summary.annualExpense += annual
+                summary.monthlyExpense += monthly
+            }
+        }
+        return summary
+    }
+
     // MARK: - Identidad de una ocurrencia
 
     /// `bill-<uuid>-<yyyy-MM-dd>`. Determinista y estable entre ejecuciones:

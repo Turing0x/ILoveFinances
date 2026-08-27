@@ -72,6 +72,29 @@ enum SchemaV2: VersionedSchema {
     static var models: [any PersistentModel.Type] { SchemaV1.models }
 }
 
+/// Version 3 del esquema (Fase 7): las MISMAS diez entidades, con UN atributo
+/// nuevo en `RecurringBill` — `kindRaw`, con valor por defecto `"expense"`.
+///
+/// Aditivo, que es lo unico legal contra el esquema desplegado a Production el
+/// 24/08/2026, y por el mismo motivo que la V2 tampoco lleva `MigrationStage`:
+/// las clases `@Model` son literalmente las mismas, los checksums coinciden y
+/// `NSLightweightMigrationStage.init` aborta al arrancar si se le pide un stage
+/// entre dos versiones identicas. CoreData anade una columna con default por su
+/// cuenta.
+///
+/// Las filas que ya existen se leen con `kindRaw` a `"expense"`, que es lo que
+/// eran: facturas. Nada que convertir.
+///
+/// **Aviso de despliegue:** el atributo nuevo entra solo en el esquema de
+/// Development. Hay que hacer *Deploy Schema to Production* a mano en el
+/// Dashboard de CloudKit; hasta entonces los ingresos recurrentes se guardan en
+/// local y no sincronizan, SIN error visible.
+enum SchemaV3: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(3, 0, 0) }
+
+    static var models: [any PersistentModel.Type] { SchemaV1.models }
+}
+
 /// Plan de migracion.
 ///
 /// Se monto en la Fase 1 con una sola version, cuando parecia innecesario, por
@@ -79,7 +102,7 @@ enum SchemaV2: VersionedSchema {
 /// sincronizados en CloudKit, es justo el momento en que no se puede. La Fase 6
 /// lo estrena.
 enum ILoveFinancesMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [SchemaV1.self, SchemaV2.self] }
+    static var schemas: [any VersionedSchema.Type] { [SchemaV1.self, SchemaV2.self, SchemaV3.self] }
 
     static var stages: [MigrationStage] { [] }
 }

@@ -18,8 +18,8 @@ struct RootView: View {
             Tab("Bus", systemImage: "bus") {
                 TransportView()
             }
-            Tab("Facturas", systemImage: "calendar.badge.clock") {
-                BillsView()
+            Tab("Recurrentes", systemImage: "calendar.badge.clock") {
+                RecurringView()
             }
             Tab("Compras", systemImage: "cart") {
                 PurchasesView()

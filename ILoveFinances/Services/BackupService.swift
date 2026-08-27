@@ -146,6 +146,10 @@ enum BackupService {
                     "id", "name", "estimatedAmount", "isVariableAmount", "recurrence",
                     "dayOfMonth", "startDate", "endDate", "isActive", "reminderDaysBefore",
                     "accountID", "categoryID", "familyTagID", "createdAt",
+                    // Columna de la Fase 7, al final: una copia anterior no la
+                    // trae y la importacion la lee por nombre, asi que su
+                    // ausencia se resuelve sola como "expense".
+                    "kind",
                 ],
                 rows: recurringBills.map { bill in
                     [
@@ -162,6 +166,7 @@ enum BackupService {
                         CSVCodec.string(from: bill.category?.id),
                         CSVCodec.string(from: bill.familyTag?.id),
                         CSVCodec.string(from: bill.createdAt),
+                        bill.kind.rawValue,
                     ]
                 }
             ),
@@ -369,6 +374,8 @@ enum BackupService {
                 name: row["name"] ?? "",
                 estimatedAmount: estimated,
                 isVariableAmount: CSVCodec.bool(from: row["isVariableAmount"] ?? ""),
+                // Copia anterior a la Fase 7: sin columna, era una factura.
+                kind: TransactionKind(rawValue: row["kind"] ?? "") ?? .expense,
                 recurrence: Recurrence(rawValue: row["recurrence"] ?? "") ?? .monthly,
                 dayOfMonth: Int(row["dayOfMonth"] ?? "") ?? 1,
                 startDate: CSVCodec.date(from: row["startDate"] ?? "") ?? Date(),

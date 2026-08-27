@@ -2,8 +2,8 @@ import Charts
 import SwiftData
 import SwiftUI
 
-/// Detalle de una factura: configuracion, lo que viene, y el historial de lo
-/// que se ha pagado.
+/// Detalle de un recurrente: configuracion, lo que viene, y el historial de lo
+/// que se ha pagado —o cobrado, si es un ingreso.
 ///
 /// El historial es la razon de ser de la pantalla en las facturas variables:
 /// ver que la luz de enero fue un 30 % mas cara que la de diciembre es
@@ -62,7 +62,7 @@ struct BillDetailView: View {
                 Text(Money.formatted(bill.estimatedAmount)).monospacedDigit()
             }
             if let media = averagePaid {
-                LabeledContent("Media pagada") {
+                LabeledContent(bill.isIncome ? "Media cobrada" : "Media pagada") {
                     Text(Money.formatted(media)).monospacedDigit()
                 }
             }
@@ -73,7 +73,7 @@ struct BillDetailView: View {
                 "Aviso",
                 value: bill.reminderDaysBefore == 0 ? "El mismo día" : "\(bill.reminderDaysBefore) días antes"
             )
-            Toggle("Activa", isOn: $bill.isActive)
+            Toggle(bill.isIncome ? "Activo" : "Activa", isOn: $bill.isActive)
                 .onChange(of: bill.isActive) { _, _ in
                     try? context.save()
                     // Desactivar cancela los avisos pendientes de esta factura:
@@ -88,14 +88,14 @@ struct BillDetailView: View {
         if bill.isActive {
             Section("Próximas") {
                 if upcoming.isEmpty {
-                    Text("Ninguna: la factura ya ha terminado.")
+                    Text(bill.isIncome ? "Ninguna: el ingreso ya ha terminado." : "Ninguna: la factura ya ha terminado.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(upcoming) { item in
                     UpcomingRow(item: item)
                         .swipeActions(edge: .trailing) {
                             if !item.isPaid {
-                                Button("Pagada", systemImage: "checkmark") {
+                                Button(bill.isIncome ? "Cobrada" : "Pagada", systemImage: "checkmark") {
                                     payingOccurrence = BillPrefill(bill: bill, occurrenceDate: item.date)
                                 }
                                 .tint(.green)
@@ -122,14 +122,14 @@ struct BillDetailView: View {
     }
 
     private var historySection: some View {
-        Section("Historial de pagos") {
+        Section(bill.isIncome ? "Historial de cobros" : "Historial de pagos") {
             ForEach(payments) { payment in
                 NavigationLink {
                     TransactionDetailView(transaction: payment)
                 } label: {
                     LabeledContent {
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(Money.formatted(payment.amount)).monospacedDigit()
+                            AmountText(transaction: payment)
                             deviation(payment)
                         }
                     } label: {
@@ -142,15 +142,19 @@ struct BillDetailView: View {
     }
 
     /// Desviacion respecto al estimado. Solo tiene sentido si hay estimado.
+    ///
+    /// El color se lee al reves en un ingreso: cobrar mas de lo previsto es
+    /// buena noticia, pagar mas no.
     @ViewBuilder
     private func deviation(_ payment: Transaction) -> some View {
         if bill.estimatedAmount > 0 {
             let delta = payment.amount - bill.estimatedAmount
             let percent = Money.rounded((delta / bill.estimatedAmount) * 100, scale: 0)
             if delta != 0 {
+                let favorable = bill.isIncome ? delta > 0 : delta < 0
                 Text("\(delta > 0 ? "+" : "")\(percent.description) %")
                     .font(.caption2)
-                    .foregroundStyle(delta > 0 ? .red : .green)
+                    .foregroundStyle(favorable ? .green : .red)
             }
         }
     }

@@ -19,6 +19,7 @@ struct DashboardView: View {
                 periodSection
                 balanceSection
                 flowSection
+                if hasRecurring { recurringSummarySection }
                 if !upcomingBills.isEmpty { upcomingBillsSection }
                 if !breakdown.isEmpty { categorySection }
                 if usedFamilyTags.count > 1 { familySection }
@@ -91,9 +92,20 @@ struct DashboardView: View {
         .sorted { $0.amount > $1.amount }
     }
 
-    /// Proximas facturas a 30 dias. La ventana es mas corta que la de la
-    /// pestana de Facturas (60) a proposito: el resumen es un vistazo, no el
-    /// listado completo.
+    private var recurringSummary: RecurringBillService.Summary {
+        RecurringBillService.summary(bills: bills)
+    }
+
+    /// Hay algo vigente que resumir. Sin esto, la tarjeta saldria a ceros en una
+    /// app recien instalada.
+    private var hasRecurring: Bool {
+        let resumen = recurringSummary
+        return resumen.monthlyExpense > 0 || resumen.monthlyIncome > 0
+    }
+
+    /// Proximas ocurrencias a 30 dias, gastos e ingresos. La ventana es mas
+    /// corta que la de la pestana de Recurrentes (60) a proposito: el resumen es
+    /// un vistazo, no el listado completo.
     private var upcomingBills: [RecurringBillService.Upcoming] {
         RecurringBillService.upcoming(
             bills: bills.filter(\.isActive),
@@ -227,16 +239,47 @@ struct DashboardView: View {
         }
     }
 
+    /// Compromisos fijos, normalizados a mes y ano.
+    ///
+    /// No es lo que cae en los proximos 30 dias —eso es la seccion de abajo—
+    /// sino con cuanto se cuenta de forma estable: un anual reparte su peso
+    /// entre los doce meses.
+    private var recurringSummarySection: some View {
+        Section("Recurrentes") {
+            let resumen = recurringSummary
+            SummaryRow(title: "Gasto fijo", monthly: resumen.monthlyExpense, annual: resumen.annualExpense, kind: .expense)
+            SummaryRow(title: "Ingreso fijo", monthly: resumen.monthlyIncome, annual: resumen.annualIncome, kind: .income)
+            SummaryRow(title: "Neto", monthly: resumen.monthlyNet, annual: resumen.annualNet, kind: nil)
+        }
+    }
+
     private var upcomingBillsSection: some View {
-        Section("Próximas facturas") {
+        Section("Próximos 30 días") {
             ForEach(upcomingBills) { item in
                 UpcomingRow(item: item)
             }
-            LabeledContent("Total estimado a 30 días") {
-                Text(Money.formatted(upcomingBills.reduce(Decimal.zero) { $0 + $1.bill.estimatedAmount }))
-                    .monospacedDigit()
+            // Los dos totales van SEPARADOS: sumarlos en una sola cifra
+            // restaria los ingresos de las facturas y daria un numero que no
+            // significa nada — ni lo que hay que pagar, ni lo que va a entrar.
+            if upcomingExpense > 0 {
+                LabeledContent("A pagar") {
+                    Text(Money.formatted(upcomingExpense)).monospacedDigit()
+                }
+            }
+            if upcomingIncome > 0 {
+                LabeledContent("A cobrar") {
+                    Text(Money.formatted(upcomingIncome)).monospacedDigit()
+                }
             }
         }
+    }
+
+    private var upcomingExpense: Decimal {
+        upcomingBills.filter { !$0.bill.isIncome }.reduce(Decimal.zero) { $0 + $1.bill.estimatedAmount }
+    }
+
+    private var upcomingIncome: Decimal {
+        upcomingBills.filter(\.bill.isIncome).reduce(Decimal.zero) { $0 + $1.bill.estimatedAmount }
     }
 
     private var familySection: some View {

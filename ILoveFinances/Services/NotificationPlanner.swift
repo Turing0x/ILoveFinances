@@ -13,6 +13,10 @@ enum NotificationPlanner {
     /// el sistema descarta las sobrantes EN SILENCIO — no hay error, solo
     /// avisos que no llegan. De ahi que el corte sea explicito aqui y tenga
     /// test propio.
+    ///
+    /// Desde la Fase 7 el cupo lo comparten gastos e ingresos. No se reparte por
+    /// tipo: se ordena por fecha y se corta, asi que lo que se pierde es siempre
+    /// lo mas lejano — que es lo que la siguiente reprogramacion recupera.
     static let systemLimit = 64
 
     /// Ventana deslizante. Programar todo el futuro de una factura indefinida
@@ -87,6 +91,9 @@ enum NotificationPlanner {
         let cantidad = item.bill.isVariableAmount ? "~\(importe)" : importe
         let dia = item.date.formatted(.dateTime.day().month(.wide))
         let cuenta = item.bill.account.map { " · \($0.name)" } ?? ""
-        return "\(cantidad) el \(dia)\(cuenta)"
+        // Un ingreso no "se paga": el aviso dice que ENTRA, que es informacion
+        // distinta y no debe leerse como algo pendiente de hacer.
+        let verbo = item.bill.isIncome ? "Entran " : ""
+        return "\(verbo)\(cantidad) el \(dia)\(cuenta)"
     }
 }

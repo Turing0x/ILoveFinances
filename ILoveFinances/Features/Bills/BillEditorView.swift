@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-/// Alta y edicion de una factura recurrente.
+/// Alta y edicion de un recurrente, gasto o ingreso.
 ///
 /// Debajo del formulario van las **proximas 6 ocurrencias**, recalculadas en
 /// vivo. Es el criterio de cierre de la fase puesto donde se configura: si el
@@ -9,6 +9,9 @@ import SwiftUI
 /// despues.
 struct BillEditorView: View {
     let bill: RecurringBill?
+    /// Tipo con el que se abre un alta nueva: el que se esta mirando en la
+    /// lista. En edicion no pinta nada, manda el del propio recurrente.
+    var initialKind: TransactionKind = .expense
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -20,6 +23,7 @@ struct BillEditorView: View {
     @State private var name = ""
     @State private var amountText = "0"
     @State private var isVariableAmount = false
+    @State private var kind: TransactionKind = .expense
     @State private var recurrence: Recurrence = .monthly
     @State private var dayOfMonth = 1
     @State private var startDate = Date()
@@ -35,12 +39,28 @@ struct BillEditorView: View {
         NavigationStack {
             Form {
                 Section {
+                    Picker("Tipo", selection: $kind) {
+                        Text("Gasto").tag(TransactionKind.expense)
+                        Text("Ingreso").tag(TransactionKind.income)
+                    }
+                    .pickerStyle(.segmented)
+
                     TextField("Nombre", text: $name)
                     TextField("Importe estimado", text: $amountText)
                         .keyboardType(.decimalPad)
                     Toggle("Importe variable", isOn: $isVariableAmount)
                 } footer: {
-                    Text("Marca importe variable en la luz o el agua: el estimado solo sirve de referencia y el importe real se introduce al pagarla.")
+                    Text(isIncome
+                         ? "Marca importe variable en lo que cobras por suscripciones: el estimado solo sirve de referencia y el importe real se introduce al cobrarlo."
+                         : "Marca importe variable en la luz o el agua: el estimado solo sirve de referencia y el importe real se introduce al pagarla.")
+                }
+                // Cambiar de tipo invalida la categoria elegida: una de gasto
+                // colgando de un ingreso no la ensena ningun selector y se
+                // quedaria ahi en silencio. La comparacion evita que al abrir
+                // un ingreso ya guardado se borre su propia categoria, porque
+                // `load` cambia el tipo despues de que exista el estado.
+                .onChange(of: kind) { _, nuevo in
+                    if selectedCategory?.kind != nuevo { selectedCategory = nil }
                 }
 
                 Section("Cuándo") {
@@ -66,17 +86,17 @@ struct BillEditorView: View {
                         reminderDaysBefore == 0 ? "El mismo día" : "\(reminderDaysBefore) días antes",
                         value: $reminderDaysBefore, in: 0...30
                     )
-                    Toggle("Activa", isOn: $isActive)
+                    Toggle(isIncome ? "Activo" : "Activa", isOn: $isActive)
                 }
 
-                Section("Dónde se carga") {
+                Section(isIncome ? "Dónde entra" : "Dónde se carga") {
                     Picker("Cuenta", selection: $selectedAccount) {
                         Text("Ninguna").tag(Account?.none)
                         ForEach(accounts.filter { !$0.isArchived }) { Text($0.name).tag(Account?.some($0)) }
                     }
                     Picker("Categoría", selection: $selectedCategory) {
                         Text("Sin categoría").tag(TransactionCategory?.none)
-                        ForEach(categories.filter { $0.kind == .expense }) {
+                        ForEach(categories.filter { $0.kind == kind }) {
                             Text($0.name).tag(TransactionCategory?.some($0))
                         }
                     }
@@ -100,7 +120,7 @@ struct BillEditorView: View {
                     }
                 }
             }
-            .navigationTitle(bill == nil ? "Nueva factura" : "Factura")
+            .navigationTitle(titulo)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
@@ -110,6 +130,13 @@ struct BillEditorView: View {
             }
             .onAppear(perform: load)
         }
+    }
+
+    private var isIncome: Bool { kind == .income }
+
+    private var titulo: String {
+        if bill == nil { return isIncome ? "Nuevo ingreso" : "Nueva factura" }
+        return isIncome ? "Ingreso" : "Factura"
     }
 
     // MARK: - Previsualizacion
@@ -132,7 +159,11 @@ struct BillEditorView: View {
     // MARK: - Cargar y guardar
 
     private func load() {
-        guard let bill else { return }
+        guard let bill else {
+            kind = initialKind
+            return
+        }
+        kind = bill.kind
         name = bill.name
         amountText = Money.csvString(bill.estimatedAmount)
         isVariableAmount = bill.isVariableAmount
@@ -155,6 +186,7 @@ struct BillEditorView: View {
             bill.name = name
             bill.estimatedAmount = amount
             bill.isVariableAmount = isVariableAmount
+            bill.kind = kind
             bill.recurrence = recurrence
             bill.dayOfMonth = dayOfMonth
             bill.startDate = startDate
@@ -170,6 +202,7 @@ struct BillEditorView: View {
                     name: name,
                     estimatedAmount: amount,
                     isVariableAmount: isVariableAmount,
+                    kind: kind,
                     recurrence: recurrence,
                     dayOfMonth: dayOfMonth,
                     startDate: startDate,

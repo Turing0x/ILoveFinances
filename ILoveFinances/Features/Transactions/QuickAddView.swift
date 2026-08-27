@@ -7,7 +7,8 @@ import SwiftUI
 /// De ahi las decisiones de aqui: importe primero y con el teclado ya enfocado,
 /// las 6 categorias mas usadas recientemente a un toque, y fecha por defecto
 /// hoy. Guardar y cerrar en tres toques.
-/// Datos con los que se abre el alta al marcar una factura como pagada.
+/// Datos con los que se abre el alta al marcar una ocurrencia como pagada —o
+/// cobrada, si el recurrente es un ingreso.
 ///
 /// La factura no se paga sola: se abre esta misma pantalla con todo relleno y
 /// el importe enfocado, porque en las variables —la luz— el importe real casi
@@ -89,7 +90,7 @@ struct QuickAddView: View {
                 Section {
                     Picker(kind == .transfer ? "Desde" : "Cuenta", selection: $selectedAccount) {
                         Text("Ninguna").tag(Account?.none)
-                        ForEach(activeAccounts) { Text($0.name).tag(Account?.some($0)) }
+                        ForEach(payableAccounts) { Text($0.name).tag(Account?.some($0)) }
                     }
 
                     if kind == .transfer {
@@ -130,7 +131,7 @@ struct QuickAddView: View {
     }
 
     private var title: String {
-        if prefill != nil { return "Pagar factura" }
+        if let prefill { return prefill.bill.isIncome ? "Registrar cobro" : "Pagar factura" }
         if recharge != nil { return "Recargar tarjeta" }
         return "Nuevo movimiento"
     }
@@ -144,23 +145,25 @@ struct QuickAddView: View {
         if let recharge {
             kind = .transfer
             counterpartAccount = recharge.card
-            // Origen: la primera cuenta que NO sea la tarjeta. Recargar una
-            // tarjeta desde si misma no significa nada.
-            selectedAccount = activeAccounts.first { $0.id != recharge.card.id }
+            // Origen: la primera cuenta pagable, ya sin la propia tarjeta ni
+            // ninguna otra de transporte.
+            selectedAccount = payableAccounts.first
             note = "Recarga \(recharge.card.name)"
             return
         }
 
         guard let prefill else {
-            if selectedAccount == nil { selectedAccount = activeAccounts.first }
+            if selectedAccount == nil { selectedAccount = payableAccounts.first }
             return
         }
         let bill = prefill.bill
-        kind = .expense
+        // El tipo lo manda el recurrente: una nomina marcada como cobrada tiene
+        // que caer como INGRESO, no como gasto.
+        kind = bill.kind
         amountText = Money.csvString(bill.estimatedAmount)
         date = prefill.occurrenceDate
         note = bill.name
-        selectedAccount = bill.account ?? activeAccounts.first
+        selectedAccount = bill.account ?? payableAccounts.first
         selectedCategory = bill.category
         selectedFamilyTag = bill.familyTag
     }
@@ -168,6 +171,15 @@ struct QuickAddView: View {
     // MARK: - Atajos de categoria
 
     private var activeAccounts: [Account] { accounts.filter { !$0.isArchived } }
+
+    /// Cuentas elegibles como origen de un movimiento: ni archivadas ni de
+    /// transporte. Una tarjeta de transporte no se usa para pagar nada, solo
+    /// se recibe en ella — por eso solo aparece en el selector "Hasta" de un
+    /// traspaso, nunca en "Cuenta" ni en "Desde". Pagar CON ella rompe el
+    /// modelo: su saldo se gasta viaje a viaje, no en compras sueltas.
+    private var payableAccounts: [Account] {
+        activeAccounts.filter { $0.type != .transport }
+    }
 
     private var categoriesForKind: [TransactionCategory] {
         categories.filter { $0.kind == kind }

@@ -11,7 +11,7 @@ struct PriceComparatorTests {
 
     private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
-            for: Schema(SchemaV2.models),
+            for: Schema(SchemaV3.models),
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
         return ModelContext(container)

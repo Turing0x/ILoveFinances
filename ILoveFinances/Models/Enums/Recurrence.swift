@@ -51,6 +51,26 @@ enum Recurrence: String, Codable, CaseIterable {
         }
     }
 
+    /// Cuantas veces cae al ano. Es lo que normaliza importes de periodicidades
+    /// distintas a un mismo mensual o anual comparable: un trimestral de 300 €
+    /// son 1.200 €/ano y 100 €/mes.
+    ///
+    /// Semanal y quincenal son aproximaciones DELIBERADAS: 52 semanas son 364
+    /// dias, no 365. El error es de un dia al ano y la alternativa —365/7—
+    /// devuelve un decimal periodico que ensucia todas las sumas para no ganar
+    /// nada en una cifra que ya es una estimacion.
+    var occurrencesPerYear: Decimal {
+        switch self {
+        case .weekly:     return 52
+        case .biweekly:   return 26
+        case .monthly:    return 12
+        case .bimonthly:  return 6
+        case .quarterly:  return 4
+        case .semiannual: return 2
+        case .annual:     return 1
+        }
+    }
+
     /// Duracion aproximada del ciclo en dias. Solo se usa como respaldo para
     /// emparejar pagos antiguos sin `occurrenceDate`; nunca para calcular las
     /// ocurrencias, que van por calendario real.

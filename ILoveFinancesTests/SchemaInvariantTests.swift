@@ -14,7 +14,7 @@ import Testing
 @Suite("Invariantes de CloudKit sobre el esquema")
 struct SchemaInvariantTests {
 
-    private var schema: Schema { Schema(SchemaV2.models) }
+    private var schema: Schema { Schema(SchemaV3.models) }
 
     @Test("Ningun atributo es obligatorio sin valor por defecto")
     func todoOpcionalOConDefecto() {
@@ -89,13 +89,14 @@ struct SchemaInvariantTests {
         ])
     }
 
-    /// El contenedor de la app usa `SchemaV2` (Fase 6). Si alguien lo cambia sin
+    /// El contenedor de la app usa `SchemaV3` (Fase 7). Si alguien lo cambia sin
     /// tocar el plan de migracion, o al reves, esto lo pilla: el esquema que se
     /// valida arriba tiene que ser el ULTIMO del plan, que es el que la app abre.
     @Test("El plan de migracion termina en la version que la app usa")
     func planTerminaEnLaVersionActual() {
         let ultima = ILoveFinancesMigrationPlan.schemas.last
-        #expect(ultima?.versionIdentifier == SchemaV2.versionIdentifier)
+        #expect(ultima?.versionIdentifier == SchemaV3.versionIdentifier)
+        #expect(SchemaV3.versionIdentifier > SchemaV2.versionIdentifier)
         #expect(SchemaV2.versionIdentifier > SchemaV1.versionIdentifier)
     }
 
